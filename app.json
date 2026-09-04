@@ -20,6 +20,12 @@
     },
     "web": {
       "favicon": "./assets/favicon.png"
-    }
+    },
+    "extra": {
+      "eas": {
+        "projectId": "12053434-18ca-4c6b-87e2-dfedcf8fbb54"
+      }
+    },
+    "owner": "jinshi-tesla"
   }
 }
