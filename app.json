@@ -2,6 +2,7 @@
   "expo": {
     "name": "uptime-kuma-mobile",
     "slug": "uptime-kuma-mobile",
+    "jsEngine": "hermes",
     "version": "1.0.0",
     "orientation": "portrait",
     "icon": "./assets/icon.png",
@@ -20,6 +21,8 @@
       "predictiveBackGestureEnabled": false
     },
     "web": {
+      "bundler": "metro",
+      "output": "single",
       "favicon": "./assets/favicon.png"
     },
     "extra": {

@@ -4,52 +4,44 @@ import {
   StyleSheet,
   ScrollView,
   TouchableOpacity,
-  TextInput,
   RefreshControl,
   Image,
-  Alert,
-  LayoutAnimation,
   Platform,
-  UIManager,
 } from 'react-native';
-
-import { SafeAreaView, useSafeAreaInsets } from 'react-native-safe-area-context';
-import { Appbar, Text } from 'react-native-paper';
-import { Swipeable } from 'react-native-gesture-handler';
-import { Menu, Search, Activity, Check, Plus, ChevronRight, ChevronDown, ChevronUp, ArrowUp, ArrowDown, Globe, Pause, Play, Trash2 } from 'lucide-react-native';
-import { toastiva } from 'toastiva';
+import { SafeAreaView } from 'react-native-safe-area-context';
+import { Appbar, Chip, Searchbar, Surface, Text } from 'react-native-paper';
+import { Menu, Bell, Plus, Activity, Globe, BarChart3, ArrowUp, ArrowDown } from 'lucide-react-native';
+import { getMonitors, subscribeToMonitors, pauseMonitor, resumeMonitor, RelayError, type MonitorItem, type MonitorStatus, type MonitorsStats } from '../api/relayClient';
 import {
-  getMonitors,
-  subscribeToMonitors,
-  pauseSite,
-  resumeSite,
-  deleteSite,
-  pausePage,
-  resumePage,
-  deletePage,
-  RelayError,
-  type MonitorItem,
-  type MonitorStatus,
-  type MonitorsStats,
-} from '../api/relayClient';
+  formatAvailabilityPercent,
+  formatUrlLabel,
+  getAverageAvailability,
+  getPrimaryUrl,
+  getStatusTone,
+} from '../utils/monitors';
+import type { DetailTabKey } from './MonitorDetailScreen';
 
 const theme = {
   colors: {
-    background: '#0F1216',
-    surface: '#161B22',
-    surfaceChild: '#1C2128',
-    primary: '#4ADE80',
-    onPrimary: '#00391A',
-    onBackground: '#FFFFFF',
-    outline: '#334155',
-    textMuted: '#94A3B8',
-    chipActiveBg: '#3B3549',
+    background: '#0F1115',
+    surface: '#1A1E27',
+    surfaceVariant: '#202833',
+    surfaceHigh: '#232B36',
+    primary: '#7DD3FC',
+    onPrimary: '#082F49',
+    onBackground: '#F8FAFC',
+    outline: '#384456',
+    textMuted: '#A6B0BF',
+    chipActiveBg: '#2B3747',
     chipActiveText: '#E2E8F0',
-    up: '#4ADE80',
-    down: '#F87171',
-    pending: '#FBBF24',
-    maintenance: '#60A5FA',
-    paused: '#94A3B8',
+    success: '#A7F3D0',
+    warning: '#FCD34D',
+    error: '#FCA5A5',
+    up: '#A7F3D0',
+    down: '#FCA5A5',
+    pending: '#FCD34D',
+    maintenance: '#93C5FD',
+    paused: '#B9C3CF',
   },
 };
 
@@ -62,8 +54,8 @@ const STATUS_COLORS: Record<MonitorStatus, string> = {
 };
 
 const STATUS_LABELS: Record<MonitorStatus, string> = {
-  up: 'Online',
-  down: 'Offline',
+  up: 'Active',
+  down: 'Hors ligne',
   pending: 'En attente',
   maintenance: 'Maint.',
   paused: 'Pause',
@@ -79,19 +71,25 @@ const FILTERS: { label: string; status: MonitorStatus | 'All' }[] = [
 
 const FALLBACK_POLL_INTERVAL_MS = 60000;
 
-function cleanUrl(rawUrl?: string | null): string {
-  if (!rawUrl) return '—';
-  return rawUrl.replace(/^https?:\/\//i, '').replace(/^www\./i, '').replace(/\/$/, '');
-}
-
-// --- Logo avec fallback propre ---
-function SiteLogo({ uri, size = 26 }: { uri?: string | null; size?: number }) {
+function SiteLogo({
+  uri,
+  size = 20,
+  variant = 'monitor',
+}: {
+  uri?: string | null;
+  size?: number;
+  variant?: 'monitor' | 'group';
+}) {
   const [failed, setFailed] = useState(false);
 
   if (!uri || failed) {
     return (
       <View style={[styles.logoFallback, { width: size, height: size, borderRadius: size / 4 }]}>
-        <Globe size={size * 0.65} color={theme.colors.textMuted} />
+        {variant === 'group' ? (
+          <BarChart3 size={size * 0.62} color={theme.colors.primary} />
+        ) : (
+          <Globe size={size * 0.62} color={theme.colors.textMuted} />
+        )}
       </View>
     );
   }
@@ -99,41 +97,9 @@ function SiteLogo({ uri, size = 26 }: { uri?: string | null; size?: number }) {
   return (
     <Image
       source={{ uri }}
-      style={{ width: size, height: size, borderRadius: size / 4, backgroundColor: 'transparent' }}
+      style={{ width: size, height: size, borderRadius: size / 4, backgroundColor: theme.colors.surfaceVariant }}
       onError={() => setFailed(true)}
     />
-  );
-}
-
-// --- Actions de swipe façon Mail : Pause/Reprise + Suppression -------------
-// Rendu générique réutilisé pour les lignes "site" (parent) et "page"
-// (enfant) — seul ce qui se passe au tap change (voir onPause/onDelete).
-function SwipeActions({
-  isPaused,
-  onPause,
-  onDelete,
-}: {
-  isPaused: boolean;
-  onPause: () => void;
-  onDelete: () => void;
-}) {
-  return (
-    <View style={styles.swipeActionsContainer}>
-      <TouchableOpacity
-        style={[styles.swipeActionBtn, styles.swipeActionPause]}
-        onPress={onPause}
-        activeOpacity={0.8}
-      >
-        {isPaused ? <Play size={20} color="#FFFFFF" /> : <Pause size={20} color="#FFFFFF" />}
-      </TouchableOpacity>
-      <TouchableOpacity
-        style={[styles.swipeActionBtn, styles.swipeActionDelete]}
-        onPress={onDelete}
-        activeOpacity={0.8}
-      >
-        <Trash2 size={20} color="#FFFFFF" />
-      </TouchableOpacity>
-    </View>
   );
 }
 
@@ -142,52 +108,22 @@ export default function HomeScreen({
   onSelectMonitor,
 }: {
   onNavigateToAdd: () => void;
-  onSelectMonitor: (monitorId: number) => void;
+  /** Ouvre le détail d'un groupe (ou d'un monitor) sur l'onglet demandé. */
+  onSelectMonitor: (monitorId: number, initialTab?: DetailTabKey) => void;
 }) {
   const [activeFilter, setActiveFilter] = useState<MonitorStatus | 'All'>('All');
   const [searchQuery, setSearchQuery] = useState('');
   const [monitors, setMonitors] = useState<MonitorItem[]>([]);
-  const [stats, setStats] = useState({ up: 0, down: 0, pending: 0, maintenance: 0, paused: 0 });
   const [refreshing, setRefreshing] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
-  const [lastUpdated, setLastUpdated] = useState<Date | null>(null);
+  const [isLive, setIsLive] = useState(false);
 
-  const [expandedGroups, setExpandedGroups] = useState<Set<number>>(new Set());
-
-  const isLiveRef = useRef(false);
-  const insets = useSafeAreaInsets();
   const isMounted = useRef(true);
-
-  // Stocke les anciens statuts des monitors pour détecter les passages en Down / Up
-  const prevStatusesRef = useRef<Map<number, MonitorStatus>>(new Map());
-
-  // Réfs vers les Swipeable ouverts, pour pouvoir les refermer après action
-  const swipeableRefs = useRef<Map<string, Swipeable | null>>(new Map());
+  const isLiveRef = useRef(false);
 
   const applyUpdate = useCallback((data: { stats: MonitorsStats; monitors: MonitorItem[] }) => {
     if (!isMounted.current) return;
-
-    // Détection des alertes Down / Up
-    data.monitors.forEach((m) => {
-      const prevStatus = prevStatusesRef.current.get(m.id);
-      const name = cleanUrl(m.url || m.name);
-      if (m.status === 'down' && prevStatus && prevStatus !== 'down') {
-        toastiva.error(`Alerte : ${name} est HORS LIGNE`, {
-          description: m.msg || 'Le serveur ne répond pas.',
-          duration: 5000,
-        });
-      } else if (m.status === 'up' && prevStatus === 'down') {
-        toastiva.success(`Rétablissement : ${name} est DE NOUVEAU EN LIGNE`, {
-          description: 'Le serveur répond de nouveau normalement.',
-          duration: 5000,
-        });
-      }
-      prevStatusesRef.current.set(m.id, m.status);
-    });
-
     setMonitors(data.monitors);
-    setStats(data.stats);
-    setLastUpdated(new Date());
     setLoadError(null);
   }, []);
 
@@ -210,12 +146,14 @@ export default function HomeScreen({
 
     const unsubscribe = subscribeToMonitors(
       (data) => {
+        setIsLive(true);
         isLiveRef.current = true;
         applyUpdate(data);
       },
       (message) => {
+        setIsLive(false);
         isLiveRef.current = false;
-        // Silencieux : repli normal sur le polling HTTP
+        console.warn('[HomeScreen] temps réel indisponible:', message);
       }
     );
 
@@ -230,428 +168,245 @@ export default function HomeScreen({
     };
   }, [fetchMonitors, applyUpdate]);
 
-  const filteredMonitors = useMemo(() => monitors.filter((m) => {
-    if (activeFilter !== 'All' && m.status !== activeFilter) return false;
-    if (searchQuery.trim() && !m.name.toLowerCase().includes(searchQuery.trim().toLowerCase())) {
-      return false;
-    }
-    return true;
-  }), [monitors, activeFilter, searchQuery]);
-
-  const { groups, childrenByParent, standalone } = useMemo(() => {
-    // On construit la map des enfants à partir de TOUS les monitors (pas seulement
-    // les filtrés) pour éviter qu'un groupe en pause disparaisse de la vue.
-    const allGroupsById = new Map<number, MonitorItem>();
-    const childrenMap = new Map<number, MonitorItem[]>();
-    const standaloneList: MonitorItem[] = [];
-
-    monitors.forEach(m => {
-      if (m.type === 'group') {
-        allGroupsById.set(m.id, m);
-        if (!childrenMap.has(m.id)) childrenMap.set(m.id, []);
-      }
+  /** Groupes connus, indexés par id : sert à rattacher les sous-moniteurs. */
+  const groupsById = useMemo(() => {
+    const map = new Map<number, MonitorItem>();
+    monitors.forEach((m) => {
+      if (m.type === 'group') map.set(m.id, m);
     });
+    return map;
+  }, [monitors]);
 
-    monitors.forEach(m => {
-      if (m.type !== 'group' && m.parent != null) {
-        if (!childrenMap.has(m.parent)) childrenMap.set(m.parent, []);
-        childrenMap.get(m.parent)!.push(m);
-      }
+  /**
+   * Sous-moniteurs d'un groupe.
+   * Un monitor dont le `parent` n'est pas un groupe connu est traité comme
+   * autonome (voir `rows`) pour ne jamais disparaître de l'écran d'accueil.
+   */
+  const childrenByParent = useMemo(() => {
+    const map = new Map<number, MonitorItem[]>();
+    monitors.forEach((m) => {
+      if (m.type === 'group' || m.parent == null || !groupsById.has(m.parent)) return;
+      const list = map.get(m.parent);
+      if (list) list.push(m);
+      else map.set(m.parent, [m]);
     });
+    return map;
+  }, [monitors, groupsById]);
 
-    // Un groupe est affiché si :
-    //  - il correspond lui-même au filtre actif, OU
-    //  - il a au moins un enfant correspondant au filtre actif
-    // Cela empêche un groupe en pause de disparaître complètement.
-    const matchesFilter = (m: MonitorItem) => {
-      if (activeFilter !== 'All' && m.status !== activeFilter) return false;
-      if (searchQuery.trim() && !m.name.toLowerCase().includes(searchQuery.trim().toLowerCase())) return false;
-      return true;
+  /**
+   * Lignes de l'accueil : les groupes et les monitors autonomes.
+   * Plus de collapse : les sous-moniteurs d'un groupe ne sont plus listés ici
+   * mais dans l'onglet « Monitor » du détail du groupe.
+   */
+  const rows = useMemo(
+    () => monitors.filter((m) => m.type === 'group' || m.parent == null || !groupsById.has(m.parent)),
+    [monitors, groupsById]
+  );
+
+  const matchesStatus = (m: MonitorItem) => activeFilter === 'All' || m.status === activeFilter;
+
+  const matchesQuery = (m: MonitorItem) => {
+    const query = searchQuery.trim().toLowerCase();
+    if (!query) return true;
+    return m.name.toLowerCase().includes(query) || (m.url ?? '').toLowerCase().includes(query);
+  };
+
+  /**
+   * Un groupe reste visible dès qu'un de ses sous-moniteurs correspond au
+   * filtre : sinon un groupe contenant un monitor hors ligne disparaîtrait de
+   * la vue « Hors ligne » — et comme il n'y a plus de collapse, il serait
+   * impossible de retrouver ce monitor.
+   */
+  const isRowVisible = (row: MonitorItem) => {
+    if (matchesStatus(row) && matchesQuery(row)) return true;
+    const children = childrenByParent.get(row.id) ?? [];
+    return children.some((child) => matchesStatus(child) && matchesQuery(child));
+  };
+
+  const visibleRows = useMemo(() => rows.filter(isRowVisible), [rows, activeFilter, searchQuery, childrenByParent]);
+
+  const filterCounts = useMemo<Record<MonitorStatus | 'All', number>>(() => {
+    const counts: Record<MonitorStatus | 'All', number> = {
+      All: rows.length,
+      up: 0,
+      down: 0,
+      pending: 0,
+      maintenance: 0,
+      paused: 0,
     };
+    const statuses: MonitorStatus[] = ['up', 'down', 'pending', 'maintenance', 'paused'];
 
-    const groupsList: MonitorItem[] = [];
-    allGroupsById.forEach(group => {
-      const children = childrenMap.get(group.id) || [];
-      const selfMatches = matchesFilter(group);
-      const childMatches = children.some(c => matchesFilter(c));
-      if (selfMatches || childMatches) {
-        groupsList.push(group);
-      }
+    rows.forEach((row) => {
+      const children = childrenByParent.get(row.id) ?? [];
+      statuses.forEach((status) => {
+        if (row.status === status || children.some((child) => child.status === status)) {
+          counts[status] += 1;
+        }
+      });
     });
 
-    // Les moniteurs standalone (sans parent) filtrés normalement
-    filteredMonitors.forEach(m => {
-      if (m.type !== 'group' && m.parent == null) {
-        standaloneList.push(m);
-      }
-    });
+    return counts;
+  }, [rows, childrenByParent]);
 
-    return { groups: groupsList, childrenByParent: childrenMap, standalone: standaloneList };
-  }, [monitors, filteredMonitors, activeFilter, searchQuery]);
-
-  const toggleGroup = (groupId: number) => {
-    LayoutAnimation.configureNext({
-      duration: 280,
-      create: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-      update: { type: LayoutAnimation.Types.easeInEaseOut },
-      delete: { type: LayoutAnimation.Types.easeInEaseOut, property: LayoutAnimation.Properties.opacity },
-    });
-    setExpandedGroups(prev => {
-      const next = new Set(prev);
-      if (next.has(groupId)) {
-        next.delete(groupId);
-      } else {
-        next.add(groupId);
-      }
-      return next;
-    });
-  };
-
-  const closeSwipeable = (key: string) => {
-    swipeableRefs.current.get(key)?.close();
-  };
-
-  // --- Actions niveau PAGE (enfant) ------------------------------------------
-  const handleTogglePausePage = async (page: MonitorItem) => {
-    closeSwipeable(`child-${page.id}`);
-    const name = cleanUrl(page.url || page.name);
+  const handleTogglePause = async (monitor: MonitorItem) => {
+    if (Platform.OS === 'web') {
+      setLoadError('Pause/reprise non disponible sur la version web (lecture seule).');
+      return;
+    }
     try {
-      if (page.status === 'paused') {
-        await resumePage(page.id);
-        toastiva.success(`Page reprise : ${name}`);
+      if (monitor.active) {
+        await pauseMonitor(monitor.id);
       } else {
-        await pausePage(page.id);
-        toastiva.success(`Page mise en pause : ${name}`);
+        await resumeMonitor(monitor.id);
       }
-      fetchMonitors(true);
+      fetchMonitors();
     } catch (err) {
-      const msg = err instanceof RelayError ? err.message : "Impossible de modifier l'état de cette page.";
-      toastiva.error(msg);
-      Alert.alert('Erreur', msg);
+      const message = err instanceof RelayError ? err.message : 'Erreur lors du changement de statut.';
+      setLoadError(message);
     }
   };
 
-  const handleDeletePage = (page: MonitorItem) => {
-    Alert.alert(
-      'Supprimer cette page ?',
-      `"${cleanUrl(page.url || page.name)}" sera supprimée définitivement. Cette action est irréversible.`,
-      [
-        { text: 'Annuler', style: 'cancel', onPress: () => closeSwipeable(`child-${page.id}`) },
-        {
-          text: 'Supprimer',
-          style: 'destructive',
-          onPress: async () => {
-            const name = cleanUrl(page.url || page.name);
-            try {
-              await deletePage(page.id);
-              toastiva.success(`Page supprimée : ${name}`);
-              fetchMonitors(true);
-            } catch (err) {
-              const msg = err instanceof RelayError ? err.message : 'Suppression impossible.';
-              toastiva.error(msg);
-              Alert.alert('Erreur', msg);
-              closeSwipeable(`child-${page.id}`);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  // --- Actions niveau SITE (parent / groupe) ---------------------------------
-  const handleTogglePauseSite = async (group: MonitorItem) => {
-    closeSwipeable(`group-${group.id}`);
-    const name = cleanUrl(group.url || group.name);
-    try {
-      if (group.status === 'paused') {
-        await resumeSite(group.id);
-        toastiva.success(`Site repris : ${name}`);
-      } else {
-        await pauseSite(group.id);
-        toastiva.success(`Site mis en pause : ${name}`);
-      }
-      fetchMonitors(true);
-    } catch (err) {
-      const msg = err instanceof RelayError ? err.message : "Impossible de modifier l'état de ce site.";
-      toastiva.error(msg);
-      Alert.alert('Erreur', msg);
-    }
-  };
-
-  const handleDeleteSite = (group: MonitorItem) => {
-    const children = childrenByParent.get(group.id) || [];
-    const childCount = children.length;
-    Alert.alert(
-      'Supprimer ce site ?',
-      childCount > 0
-        ? `"${cleanUrl(group.url || group.name)}" et ${childCount === 1 ? 'sa page' : `ses ${childCount} pages`} seront supprimés définitivement. Cette action est irréversible.`
-        : `"${cleanUrl(group.url || group.name)}" sera supprimé définitivement. Cette action est irréversible.`,
-      [
-        { text: 'Annuler', style: 'cancel', onPress: () => closeSwipeable(`group-${group.id}`) },
-        {
-          text: 'Tout supprimer',
-          style: 'destructive',
-          onPress: async () => {
-            const name = cleanUrl(group.url || group.name);
-            try {
-              await deleteSite(group.id);
-              toastiva.success(`Site supprimé : ${name}`);
-              fetchMonitors(true);
-            } catch (err) {
-              const msg = err instanceof RelayError ? err.message : 'Suppression impossible.';
-              toastiva.error(msg);
-              Alert.alert('Erreur', msg);
-              closeSwipeable(`group-${group.id}`);
-            }
-          },
-        },
-      ]
-    );
-  };
-
-  const STATS_DISPLAY = [
-    { label: 'Active', value: String(stats.up), color: theme.colors.up },
-    { label: 'Hors ligne', value: String(stats.down), color: theme.colors.down },
-    { label: 'Atten.', value: String(stats.pending), color: theme.colors.pending },
-    { label: 'Maint.', value: String(stats.maintenance), color: theme.colors.maintenance },
-    { label: 'Pause', value: String(stats.paused), color: theme.colors.paused },
-  ];
-
-  const renderChildRow = (monitor: MonitorItem) => {
-    const statusColor = STATUS_COLORS[monitor.status] || theme.colors.up;
-    const statusLabel = monitor.status === 'up' ? 'Online' : monitor.status === 'down' ? 'Offline' : STATUS_LABELS[monitor.status];
-    const displayName = cleanUrl(monitor.url || monitor.name);
-    const key = `child-${monitor.id}`;
+  const renderRow = (row: MonitorItem) => {
+    const isGroup = row.type === 'group';
+    const children = childrenByParent.get(row.id) ?? [];
+    // La valeur affichée est la moyenne de disponibilité des sous-moniteurs
+    // du groupe (ou celle du monitor lui-même) : 100% = jamais hors ligne.
+    const percent = getAverageAvailability(children, row);
+    const tone = getStatusTone(percent, row.status, STATUS_COLORS);
+    const isPaused = !row.active || row.status === 'paused';
+    // Badge de tendance (maquette Google Finance) : flèche vers le haut quand
+    // le service n'est jamais tombé, sinon flèche vers le bas.
+    const isTrendUp = tone === STATUS_COLORS.up;
+    // Sous-titre : l'URL principale du site, c'est-à-dire la page d'accueil.
+    // Pour un groupe on la déduit de ses sous-moniteurs, et on ne montre plus
+    // le nombre de sous-moniteurs à cet endroit.
+    const subtitle = formatUrlLabel(getPrimaryUrl(row, children)) ?? STATUS_LABELS[row.status];
 
     return (
-      <Swipeable
-        key={key}
-        ref={(ref) => swipeableRefs.current.set(key, ref)}
-        renderRightActions={() => (
-          <SwipeActions
-            isPaused={monitor.status === 'paused'}
-            onPause={() => handleTogglePausePage(monitor)}
-            onDelete={() => handleDeletePage(monitor)}
-          />
-        )}
-        overshootRight={false}
-      >
+      <Surface key={row.id} style={styles.rowCard} elevation={0}>
         <TouchableOpacity
-          style={styles.childCard}
-          onPress={() => onSelectMonitor(monitor.id)}
-          activeOpacity={0.7}
+          style={styles.row}
+          onPress={() => onSelectMonitor(row.id, 'monitor')}
+          activeOpacity={0.85}
+          accessibilityRole="button"
+          accessibilityLabel={`${row.name}, disponibilité ${formatAvailabilityPercent(percent)}`}
         >
-          <View style={styles.childLeft}>
-            <View style={styles.logoBox}>
-              <SiteLogo uri={monitor.logoUrl} size={26} />
-            </View>
-            <View style={styles.childInfo}>
-              <Text style={styles.childTitle} numberOfLines={1}>
-                {displayName}
-              </Text>
-              <View style={styles.childStatusRow}>
-                <View style={[styles.statusDot, { backgroundColor: statusColor }]} />
-                <Text style={[styles.childStatusText, { color: statusColor }]}>
-                  {statusLabel}
-                </Text>
-              </View>
-            </View>
+          <View style={styles.rowLogo}>
+            <SiteLogo uri={row.logoUrl} size={22} variant={isGroup ? 'group' : 'monitor'} />
           </View>
 
-          <View style={styles.actionBtn}>
-            <ChevronRight size={18} color="#E2E8F0" />
+          <View style={styles.rowTexts}>
+            <Text style={styles.rowName} numberOfLines={1}>{row.name}</Text>
+            <Text style={styles.rowSubtitle} numberOfLines={1}>{subtitle}</Text>
+          </View>
+
+          <View style={styles.rowRight}>
+            <Text style={[styles.rowPercent, { color: tone }]}>{formatAvailabilityPercent(percent)}</Text>
+
+            <TouchableOpacity
+              style={[styles.trendBadge, { backgroundColor: `${tone}2E` }]}
+              onPress={() => handleTogglePause(row)}
+              activeOpacity={0.75}
+              hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
+              accessibilityRole="button"
+              accessibilityLabel={isPaused ? `Reprendre ${row.name}` : `Mettre en pause ${row.name}`}
+              disabled={Platform.OS === 'web'}
+            >
+              {isTrendUp ? (
+                <ArrowUp size={14} color={tone} strokeWidth={3} />
+              ) : (
+                <ArrowDown size={14} color={tone} strokeWidth={3} />
+              )}
+            </TouchableOpacity>
           </View>
         </TouchableOpacity>
-      </Swipeable>
+      </Surface>
     );
   };
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'left', 'right']}>
-      {/* Top App Bar */}
-      <Appbar.Header style={{ backgroundColor: theme.colors.background }}>
-        <Appbar.Action icon={() => <Menu color={theme.colors.onBackground} size={24} />} onPress={() => {}} />
-        <Appbar.Content title="Uptime Kuma" titleStyle={{ color: theme.colors.onBackground, fontSize: 18, fontWeight: '700' }} />
-      </Appbar.Header>
-
-      {/* Stats Row */}
-      <View style={styles.statsContainer}>
-        {STATS_DISPLAY.map((stat, index) => (
-          <View key={index} style={styles.statItem}>
-            <Text style={[styles.statValue, stat.color ? { color: stat.color } : {}]}>{stat.value}</Text>
-            <Text style={styles.statLabel}>{stat.label}</Text>
-          </View>
-        ))}
+      <View style={styles.header}>
+        {/*
+          The SafeAreaView above already applies the top inset, and Paper's
+          Appbar.Header adds `paddingTop: insets.top` on its own (see
+          AppbarHeader.tsx). Passing `statusBarHeight={0}` keeps a single top
+          inset instead of stacking several and leaving an empty gap.
+        */}
+        <Appbar.Header mode="small" statusBarHeight={0} style={styles.appBar}>
+          <Appbar.Action icon={() => <Menu size={22} color={theme.colors.onBackground} />} onPress={() => {}} />
+          <Appbar.Content title="" />
+          <Appbar.Action icon={() => <Bell size={20} color={theme.colors.onBackground} />} onPress={() => {}} />
+          {Platform.OS !== 'web' && (
+            <Appbar.Action icon={() => <Plus size={22} color={theme.colors.onBackground} />} onPress={onNavigateToAdd} />
+          )}
+        </Appbar.Header>
       </View>
 
-      {/* Search Input */}
-      <View style={styles.searchContainer}>
-        <View style={styles.searchInputWrapper}>
-          <Search color={theme.colors.textMuted} size={20} style={styles.searchIcon} />
-          <TextInput
-            style={styles.searchInput}
-            placeholder="Search monitors..."
-            placeholderTextColor={theme.colors.textMuted}
-            value={searchQuery}
-            onChangeText={setSearchQuery}
-          />
-        </View>
-      </View>
+      <View style={styles.content}>
+        <Searchbar
+          placeholder="Search monitors..."
+          value={searchQuery}
+          onChangeText={setSearchQuery}
+          style={styles.searchBar}
+          inputStyle={styles.searchInput}
+          placeholderTextColor={theme.colors.textMuted}
+          iconColor={theme.colors.textMuted}
+          elevation={0}
+        />
 
-      {/* Chips Row */}
-      <View style={styles.chipsWrapper}>
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.chipsContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={styles.chipsContainer}
+          style={styles.chipsScroll}
+        >
           {FILTERS.map((filter) => {
             const isActive = activeFilter === filter.status;
+            const count = filterCounts[filter.status] ?? 0;
+
             return (
-              <TouchableOpacity
+              <Chip
                 key={filter.label}
-                style={[
-                  styles.chip,
-                  isActive ? styles.chipActive : styles.chipInactive,
-                ]}
+                selected={isActive}
                 onPress={() => setActiveFilter(filter.status)}
-                activeOpacity={0.7}
+                showSelectedCheck={isActive}
+                style={[styles.filterChip, isActive ? styles.filterChipActive : styles.filterChipInactive]}
+                textStyle={[styles.filterChipText, isActive && styles.filterChipTextActive]}
+                compact
               >
-                {isActive && <Check size={14} color={theme.colors.chipActiveText} style={styles.chipIcon} />}
-                <Text
-                  style={[
-                    styles.chipText,
-                    isActive ? { color: theme.colors.chipActiveText } : { color: theme.colors.textMuted },
-                  ]}
-                >
-                  {filter.label}
-                </Text>
-              </TouchableOpacity>
+                {`${filter.label} (${count})`}
+              </Chip>
             );
           })}
         </ScrollView>
-        {(searchQuery.trim() !== '' || activeFilter !== 'All') && (
-          <Text style={{ color: theme.colors.textMuted, fontSize: 12, paddingHorizontal: 16, marginTop: -8, marginBottom: 8 }}>
-            {filteredMonitors.length} résultat{filteredMonitors.length > 1 ? 's' : ''} trouvé{filteredMonitors.length > 1 ? 's' : ''}
-          </Text>
-        )}
-      </View>
 
-      {loadError && (
-        <Text style={styles.errorBanner}>{loadError}</Text>
-      )}
+        {loadError && <Text style={styles.errorBanner}>{loadError}</Text>}
 
-      {/* Liste des monitors */}
-      <ScrollView
-        style={styles.listContainer}
-        contentContainerStyle={filteredMonitors.length === 0 ? styles.listContentEmpty : styles.listContent}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => fetchMonitors(true)}
-            tintColor={theme.colors.primary}
-            colors={[theme.colors.primary]}
-          />
-        }
-      >
-        {filteredMonitors.length === 0 ? (
-          <View style={styles.emptyStateContainer}>
-            <Activity size={48} color={theme.colors.textMuted} strokeWidth={1.5} />
-            <Text style={styles.emptyStateText}>
-              {monitors.length === 0 ? 'No monitors yet' : 'No monitors match this filter'}
-            </Text>
-          </View>
-        ) : (
-          <View style={{ gap: 8 }}>
-            {/* Rendu des groupes */}
-            {groups.map(group => {
-              const isExpanded = expandedGroups.has(group.id);
-              const allChildren = childrenByParent.get(group.id) || [];
-              // Affiche les enfants non-élément up : down, paused, maintenance, ET pending
-              // (pending = nouveau monitor qui attend son premier check)
-              const children = allChildren.filter(c =>
-                c.status === 'down' || c.status === 'paused' || c.status === 'maintenance' || c.status === 'pending'
-              );
-              const hasDownChildren = children.length > 0;
-              const groupStatusColor = STATUS_COLORS[group.status] || theme.colors.up;
-              const groupKey = `group-${group.id}`;
-
-              return (
-                <View key={groupKey} style={styles.groupContainer}>
-                  <Swipeable
-                    ref={(ref) => swipeableRefs.current.set(groupKey, ref)}
-                    renderRightActions={() => (
-                      <SwipeActions
-                        isPaused={group.status === 'paused'}
-                        onPause={() => handleTogglePauseSite(group)}
-                        onDelete={() => handleDeleteSite(group)}
-                      />
-                    )}
-                    overshootRight={false}
-                  >
-                    <View style={styles.groupHeader}>
-                      <TouchableOpacity
-                        style={styles.groupHeaderLeft}
-                        onPress={() => onSelectMonitor(group.id)}
-                        activeOpacity={0.7}
-                      >
-                        <View style={[styles.groupStatusBadge, { backgroundColor: groupStatusColor }]}>
-                          {group.status === 'down' ? (
-                            <ArrowDown size={14} color="#FFFFFF" strokeWidth={3} />
-                          ) : (
-                            <ArrowUp size={14} color="#FFFFFF" strokeWidth={3} />
-                          )}
-                        </View>
-                        <Text style={[styles.groupName, { color: groupStatusColor }]} numberOfLines={1}>
-                          {cleanUrl(group.url || group.name)}
-                        </Text>
-                      </TouchableOpacity>
-                      {hasDownChildren && (
-                        <TouchableOpacity
-                          style={styles.groupHeaderChevron}
-                          onPress={() => toggleGroup(group.id)}
-                          activeOpacity={0.7}
-                          hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
-                        >
-                          {isExpanded ? (
-                            <ChevronUp size={18} color={theme.colors.textMuted} />
-                          ) : (
-                            <ChevronDown size={18} color={theme.colors.textMuted} />
-                          )}
-                        </TouchableOpacity>
-                      )}
-                    </View>
-                  </Swipeable>
-
-                  {isExpanded && hasDownChildren && (
-                    <View style={styles.childrenContainer}>
-                      {children.map(child => renderChildRow(child))}
-                    </View>
-                  )}
-                </View>
-              );
-            })}
-
-            {/* Rendu des éléments isolés */}
-            {standalone.map(monitor => (
-              <View key={`standalone-${monitor.id}`} style={styles.groupContainer}>
-                {renderChildRow(monitor)}
-              </View>
-            ))}
-
-            {lastUpdated && (
-              <Text style={{ textAlign: 'center', color: theme.colors.textMuted, fontSize: 11, marginTop: 16 }}>
-                Dernière mise à jour : {lastUpdated.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit', second: '2-digit' })}
+        <ScrollView
+          style={styles.listContainer}
+          contentContainerStyle={visibleRows.length === 0 ? styles.listContentEmpty : styles.listContent}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => fetchMonitors(true)}
+              tintColor={theme.colors.primary}
+              colors={[theme.colors.primary]}
+            />
+          }
+        >
+          {visibleRows.length === 0 ? (
+            <View style={styles.emptyStateContainer}>
+              <Activity size={44} color={theme.colors.textMuted} strokeWidth={1.6} />
+              <Text style={styles.emptyStateText}>
+                {monitors.length === 0 ? 'No monitors yet' : 'No monitors match this filter'}
               </Text>
-            )}
-          </View>
-        )}
-      </ScrollView>
-
-      {/* FAB */}
-      <TouchableOpacity
-        style={[styles.fab, { bottom: Math.max(insets.bottom + 24, 24) }]}
-        onPress={onNavigateToAdd}
-        activeOpacity={0.8}
-      >
-        <Plus size={24} color={theme.colors.onPrimary} strokeWidth={2.5} />
-      </TouchableOpacity>
+            </View>
+          ) : (
+            <View style={styles.listStack}>{visibleRows.map((row) => renderRow(row))}</View>
+          )}
+        </ScrollView>
+      </View>
     </SafeAreaView>
   );
 }
@@ -661,252 +416,161 @@ const styles = StyleSheet.create({
     flex: 1,
     backgroundColor: theme.colors.background,
   },
-
-  statsContainer: {
-    flexDirection: 'row',
-    justifyContent: 'space-around',
-    paddingVertical: 16,
-    borderBottomWidth: 1,
-    borderBottomColor: theme.colors.surface,
+  header: {
+    backgroundColor: theme.colors.background,
   },
-  statItem: {
-    alignItems: 'center',
+  appBar: {
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    elevation: 0,
+    shadowOpacity: 0,
+    borderBottomWidth: 0,
   },
-  statValue: {
-    fontSize: 20,
-    fontWeight: '700',
-    color: theme.colors.onBackground,
-    marginBottom: 4,
+  content: {
+    flex: 1,
+    paddingHorizontal: 14,
   },
-  statLabel: {
-    fontSize: 11,
-    fontWeight: '600',
-    color: theme.colors.textMuted,
-  },
-  searchContainer: {
-    paddingHorizontal: 16,
-    paddingTop: 16,
-    paddingBottom: 12,
-  },
-  searchInputWrapper: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    backgroundColor: 'transparent',
+  searchBar: {
+    backgroundColor: '#1D2430',
+    borderRadius: 16,
+    height: 52,
+    marginTop: 6,
+    marginBottom: 14,
     borderWidth: 1,
-    borderColor: theme.colors.outline,
-    borderRadius: 8,
-    height: 44,
-    paddingHorizontal: 12,
-  },
-  searchIcon: {
-    marginRight: 8,
+    borderColor: '#303B4A',
   },
   searchInput: {
-    flex: 1,
     color: theme.colors.onBackground,
     fontSize: 14,
+    includeFontPadding: false,
   },
-  chipsWrapper: {
-    paddingBottom: 16,
+  chipsScroll: {
+    // A horizontal ScrollView inherits `flexGrow: 1` from React Native's own
+    // base style (Libraries/Components/ScrollView/ScrollView.js), so inside a
+    // flex column it stretches vertically and swallows half of the free
+    // space: that leaves a wide empty band under the chips and makes any
+    // horizontal swipe over that band scroll the filters. Pinning it to its
+    // content height gives all the remaining space back to the list.
+    flexGrow: 0,
+    flexShrink: 0,
+    marginBottom: 10,
   },
   chipsContainer: {
-    paddingHorizontal: 16,
+    paddingRight: 8,
     gap: 8,
   },
-  chip: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 14,
-    minHeight: 36,
-    borderRadius: 6,
+  filterChip: {
+    borderRadius: 12,
+    height: 36,
+    justifyContent: 'center',
     borderWidth: 1,
   },
-  chipActive: {
+  filterChipActive: {
     backgroundColor: theme.colors.chipActiveBg,
-    borderColor: 'transparent',
+    borderColor: 'rgba(0, 0, 0, 0)',
   },
-  chipInactive: {
-    backgroundColor: 'transparent',
-    borderColor: theme.colors.outline,
+  filterChipInactive: {
+    backgroundColor: 'rgba(0, 0, 0, 0)',
+    borderColor: '#384456',
   },
-  chipIcon: {
-    marginRight: 6,
-  },
-  chipText: {
+  filterChipText: {
     fontSize: 12,
     fontWeight: '600',
-  },
-  emptyStateContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    paddingTop: 80,
-    paddingBottom: 60,
-  },
-  emptyStateText: {
-    marginTop: 12,
     color: theme.colors.textMuted,
-    fontSize: 14,
-    fontWeight: '500',
+  },
+  filterChipTextActive: {
+    color: theme.colors.chipActiveText,
   },
   errorBanner: {
-    color: '#F87171',
+    color: '#FCA5A5',
     fontSize: 12,
-    paddingHorizontal: 16,
+    paddingHorizontal: 6,
     paddingBottom: 8,
   },
   listContainer: {
     flex: 1,
   },
   listContent: {
-    paddingHorizontal: 16,
-    paddingBottom: 110,
+    paddingTop: 6,
+    paddingBottom: 20,
   },
   listContentEmpty: {
     flexGrow: 1,
   },
-
-  /* Style Groupe */
-  groupContainer: {
-    marginBottom: 8,
+  listStack: {
+    gap: 10,
   },
-  groupHeader: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    backgroundColor: theme.colors.background,
-    paddingHorizontal: 14,
-    paddingVertical: 14,
-    borderRadius: 8,
+  // ── Ligne « maquette » : logo, nom + url, disponibilité + badge de tendance ──
+  rowCard: {
+    backgroundColor: '#171C24',
+    borderRadius: 14,
     borderWidth: 1,
-    borderColor: theme.colors.outline,
+    borderColor: '#2A3543',
+    overflow: 'hidden',
   },
-  groupHeaderLeft: {
+  row: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 12,
-    flex: 1,
-  },
-  groupStatusBadge: {
-    width: 28,
-    height: 28,
-    borderRadius: 14,
-    justifyContent: 'center',
-    alignItems: 'center',
-  },
-  groupName: {
-    fontSize: 15,
-    fontWeight: '600',
-    flexShrink: 1,
-  },
-  groupHeaderChevron: {
-    padding: 8,
-    marginRight: -8, // Compensate for padding to keep it aligned with the right edge
-  },
-
-  /* Style Éléments Enfants (Indentés par rapport au groupe parent) */
-  childrenContainer: {
-    paddingTop: 8,
-    paddingHorizontal: 16,
-    gap: 8,
-  },
-  childCard: {
-    backgroundColor: theme.colors.background,
-    borderRadius: 8,
+    paddingHorizontal: 12,
     paddingVertical: 12,
-    paddingHorizontal: 14,
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
+  },
+  rowLogo: {
+    width: 40,
+    height: 40,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: theme.colors.outline,
-  },
-  childLeft: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    flex: 1,
-  },
-  logoBox: {
-    width: 44,
-    height: 44,
-    borderRadius: 10,
-    backgroundColor: '#0D1117',
+    borderColor: '#26303D',
     justifyContent: 'center',
     alignItems: 'center',
-    marginRight: 12,
-  },
-  childInfo: {
-    flex: 1,
-  },
-  childTitle: {
-    color: theme.colors.onBackground,
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 2,
-  },
-  childStatusRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  statusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  childStatusText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  actionBtn: {
-    width: 36,
-    height: 36,
-    borderRadius: 8,
-    backgroundColor: '#1E2530',
-    justifyContent: 'center',
-    alignItems: 'center',
-    marginLeft: 10,
+    backgroundColor: '#101923',
+    overflow: 'hidden',
   },
   logoFallback: {
     justifyContent: 'center',
     alignItems: 'center',
-    backgroundColor: 'transparent',
+    backgroundColor: '#101923',
   },
-
-  /* Actions de swipe (Pause / Suppression) */
-  swipeActionsContainer: {
+  rowTexts: {
+    flex: 1,
+    gap: 2,
+  },
+  rowName: {
+    color: theme.colors.onBackground,
+    fontSize: 15,
+    fontWeight: '700',
+  },
+  rowSubtitle: {
+    color: theme.colors.textMuted,
+    fontSize: 12,
+  },
+  rowRight: {
     flexDirection: 'row',
-    alignItems: 'stretch',
-    marginLeft: 8,
+    alignItems: 'center',
+    gap: 10,
   },
-  swipeActionBtn: {
-    width: 56,
+  rowPercent: {
+    fontSize: 14,
+    fontWeight: '700',
+    letterSpacing: 0.2,
+  },
+  trendBadge: {
+    width: 34,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyStateContainer: {
+    flex: 1,
     justifyContent: 'center',
     alignItems: 'center',
-    borderRadius: 8,
-    marginLeft: 6,
+    paddingTop: 80,
+    paddingBottom: 50,
   },
-  swipeActionPause: {
-    backgroundColor: theme.colors.pending,
-  },
-  swipeActionDelete: {
-    backgroundColor: theme.colors.down,
-  },
-
-  fab: {
-    position: 'absolute',
-    right: 20,
-    width: 56,
-    height: 56,
-    backgroundColor: theme.colors.primary,
-    borderRadius: 28,
-    justifyContent: 'center',
-    alignItems: 'center',
-    elevation: 6,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 6,
-    zIndex: 99,
+  emptyStateText: {
+    marginTop: 10,
+    color: theme.colors.textMuted,
+    fontSize: 14,
+    fontWeight: '500',
   },
 });

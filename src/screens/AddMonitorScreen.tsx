@@ -54,7 +54,7 @@ const SkeletonLoader: React.FC = () => {
   }, [waveAnim]);
   const leftPosition = waveAnim.interpolate({
     inputRange: [0, 1],
-    outputRange: ['-100%', '100%'],
+    outputRange: [-120, 400],
   });
   return (
     <View style={styles.skeletonContainer}>
@@ -190,7 +190,9 @@ export default function AddMonitorScreen({ onBack }: { onBack: () => void }) {
   return (
     <SafeAreaView style={[styles.container, { backgroundColor: theme.colors.background }]}>
       <StatusBar barStyle="light-content" backgroundColor={theme.colors.background} />
-      <Appbar.Header style={{ backgroundColor: theme.colors.background }}>
+      {/* The SafeAreaView above already applies the top inset, so we disable
+          Paper's own status-bar padding to avoid stacking both. */}
+      <Appbar.Header statusBarHeight={0} style={{ backgroundColor: theme.colors.background }}>
         <Appbar.Action
           icon={() => <ArrowLeft color={theme.colors.onBackground} size={24} />}
           onPress={onBack}

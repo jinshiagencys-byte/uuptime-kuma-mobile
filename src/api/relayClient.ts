@@ -1,8 +1,20 @@
 // src/api/relayClient.ts
+import { Platform } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
 
-const RELAY_URL = process.env.EXPO_PUBLIC_RELAY_URL ?? 'https://kuma-relay.up.railway.app';
-const RELAY_SECRET = process.env.EXPO_PUBLIC_RELAY_SECRET ?? '';
+const IS_WEB = Platform.OS === 'web';
+const RELAY_URL = IS_WEB
+  ? ''
+  : typeof process !== 'undefined' && process.env
+    ? process.env.RELAY_URL ?? ''
+    : '';
+const RELAY_SECRET = IS_WEB
+  ? ''
+  : typeof process !== 'undefined' && process.env
+    ? process.env.RELAY_SECRET ?? ''
+    : '';
+
+// The web build must never include the upstream relay URL or secret. Web auth goes through /api/relay only.
 
 export interface DiscoveredPage {
   url: string;
@@ -113,20 +125,63 @@ export interface MonitorDetail {
 }
 
 // --- Fonctions HTTP génériques ---
-async function relayFetch<T>(path: string, body: Record<string, unknown>): Promise<T> {
-  if (!RELAY_SECRET) {
-    throw new RelayError("EXPO_PUBLIC_RELAY_SECRET n'est pas défini.");
+function getWebPassword(): string | null {
+  if (!IS_WEB) return null;
+  if (typeof localStorage === 'undefined') return null;
+  return localStorage.getItem('app_password');
+}
+
+function getPlatformUrl(path: string): string {
+  if (IS_WEB) {
+    return `/api/relay${path}`; // Use Vercel proxy on web
   }
+  return `${RELAY_URL}${path}`; // Direct relay on native
+}
+
+function getPlatformHeaders(): HeadersInit {
+  const headers: HeadersInit = { 'Content-Type': 'application/json' };
+  
+  if (IS_WEB) {
+    const password = getWebPassword();
+    if (password) {
+      (headers as any)['x-app-password'] = password;
+    }
+  } else {
+    if (RELAY_SECRET) {
+      (headers as any)['x-relay-secret'] = RELAY_SECRET;
+    }
+  }
+  
+  return headers;
+}
+
+async function relayFetch<T>(path: string, body: Record<string, unknown>): Promise<T> {
+  if (!IS_WEB && !RELAY_SECRET) {
+    throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
+  }
+  if (IS_WEB && !getWebPassword()) {
+    throw new RelayError("Mot de passe requis sur web.");
+  }
+
   let response: Response;
   try {
-    response = await fetch(`${RELAY_URL}${path}`, {
+    response = await fetch(getPlatformUrl(path), {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json', 'x-relay-secret': RELAY_SECRET },
+      headers: getPlatformHeaders(),
       body: JSON.stringify(body),
     });
   } catch {
     throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
   }
+
+  // Handle 401 on web: clear password and redirect to login
+  if (IS_WEB && response.status === 401) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('app_password');
+    }
+    throw new RelayError('Session expirée. Veuillez vous reconnecter.', 401);
+  }
+
   let data: any = null;
   try {
     data = await response.json();
@@ -140,18 +195,31 @@ async function relayFetch<T>(path: string, body: Record<string, unknown>): Promi
 }
 
 async function relayFetchGet<T>(path: string): Promise<T> {
-  if (!RELAY_SECRET) {
-    throw new RelayError("EXPO_PUBLIC_RELAY_SECRET n'est pas défini.");
+  if (!IS_WEB && !RELAY_SECRET) {
+    throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
   }
+  if (IS_WEB && !getWebPassword()) {
+    throw new RelayError("Mot de passe requis sur web.");
+  }
+
   let response: Response;
   try {
-    response = await fetch(`${RELAY_URL}${path}`, {
+    response = await fetch(getPlatformUrl(path), {
       method: 'GET',
-      headers: { 'x-relay-secret': RELAY_SECRET },
+      headers: getPlatformHeaders(),
     });
   } catch {
     throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
   }
+
+  // Handle 401 on web: clear password and redirect to login
+  if (IS_WEB && response.status === 401) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('app_password');
+    }
+    throw new RelayError('Session expirée. Veuillez vous reconnecter.', 401);
+  }
+
   let data: any = null;
   try {
     data = await response.json();
@@ -165,18 +233,30 @@ async function relayFetchGet<T>(path: string): Promise<T> {
 }
 
 async function relayFetchDelete<T>(path: string): Promise<T> {
-  if (!RELAY_SECRET) {
-    throw new RelayError("EXPO_PUBLIC_RELAY_SECRET n'est pas défini.");
+  if (!IS_WEB && !RELAY_SECRET) {
+    throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
   }
+  if (IS_WEB && !getWebPassword()) {
+    throw new RelayError("Mot de passe requis sur web.");
+  }
+
   let response: Response;
   try {
-    response = await fetch(`${RELAY_URL}${path}`, {
+    response = await fetch(getPlatformUrl(path), {
       method: 'DELETE',
-      headers: { 'x-relay-secret': RELAY_SECRET },
+      headers: getPlatformHeaders(),
     });
   } catch {
     throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
   }
+
+  if (IS_WEB && response.status === 401) {
+    if (typeof localStorage !== 'undefined') {
+      localStorage.removeItem('app_password');
+    }
+    throw new RelayError('Session expirée. Veuillez vous reconnecter.', 401);
+  }
+
   let data: any = null;
   try {
     data = await response.json();
@@ -293,10 +373,35 @@ export function subscribeToMonitors(
   onUpdate: (data: { stats: MonitorsStats; monitors: MonitorItem[] }) => void,
   onError?: (message: string) => void
 ): () => void {
+  if (IS_WEB) {
+    let cancelled = false;
+    const poll = async () => {
+      try {
+        const data = await getMonitors();
+        if (!cancelled) {
+          onUpdate(data);
+        }
+      } catch (error) {
+        onError?.(error instanceof Error ? error.message : 'Erreur de chargement des moniteurs');
+      }
+    };
+
+    void poll();
+    const intervalId = setInterval(() => {
+      void poll();
+    }, 60000);
+
+    return () => {
+      cancelled = true;
+      clearInterval(intervalId);
+    };
+  }
+
   if (!RELAY_SECRET) {
-    onError?.("EXPO_PUBLIC_RELAY_SECRET n'est pas défini, temps réel désactivé.");
+    onError?.("Le secret de relay n'est pas défini pour le build natif, temps réel désactivé.");
     return () => {};
   }
+
   socket = io(RELAY_URL, {
     auth: { secret: RELAY_SECRET },
     reconnection: true,
@@ -308,7 +413,6 @@ export function subscribeToMonitors(
   let hasLoggedError = false;
   socket.on('connect_error', () => {
     if (!hasLoggedError) {
-      // Silencieux : le repli sur polling HTTP est automatique
       onError?.('Connexion temps réel indisponible, repli sur le rafraîchissement périodique.');
       hasLoggedError = true;
     }

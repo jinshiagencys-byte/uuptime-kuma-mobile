@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback, useRef } from 'react';
+import React, { useState, useEffect, useCallback, useRef, memo } from 'react';
 import {
   View,
   Text,
@@ -7,44 +7,48 @@ import {
   TouchableOpacity,
   RefreshControl,
   ActivityIndicator,
-  Dimensions,
+  useWindowDimensions,
   Animated,
-  Alert,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
-  ArrowLeft,
+  ChevronLeft,
+  MoreHorizontal,
   X,
-  ChevronDown,
-  Check,
-  Menu,
+  CheckCircle2,
+  Clock,
+  Layers,
+  ArrowUp,
+  ArrowDown,
 } from 'lucide-react-native';
-import { toastiva } from 'toastiva';
 import {
   getMonitorDetail,
   getMonitors,
-  pausePage,
-  resumePage,
-  acknowledgeSite,
   RelayError,
   type MonitorDetail,
-  type MonitorItem,
   type HeartbeatPoint,
+  type MonitorItem,
   type MonitorStatus,
 } from '../api/relayClient';
+import {
+  formatAvailabilityPercent,
+  getAvailabilityPercent,
+  getStatusTone,
+  getSubPageLabels,
+} from '../utils/monitors';
 
-// ─── Theme Colors ────────────────────────────────────────────────────────────
+// ─── Theme Colors (Light Design Maquette) ────────────────────────────────────
 const C = {
-  bg: '#0F171E',
-  card: '#16212B',
-  cardBorder: '#1E2C3A',
-  white: '#E1E7ED',
-  muted: '#8A99AD',
-  green: '#22C55E',
-  greenBar: '#22C55E',
+  bg: '#FFFFFF',
+  card: '#F8FAFC',
+  cardBorder: '#E2E8F0',
+  textDark: '#1E293B',
+  muted: '#64748B',
+  mutedLight: '#94A3B8',
+  primary: '#2563EB',      // Bleu vif (identique à la maquette)
+  green: '#10B981',
   red: '#EF4444',
-  yellow: '#FBBF24',
-  blue: '#3B82F6',
+  yellow: '#F59E0B',
   slate: '#64748B',
 };
 
@@ -52,18 +56,23 @@ const STATUS_COLOR: Record<MonitorStatus, string> = {
   up: C.green,
   down: C.red,
   pending: C.yellow,
-  maintenance: C.blue,
+  maintenance: C.primary,
   paused: C.slate,
 };
 
-// ─── Utilitaires ─────────────────────────────────────────────────────────────
+function formatStatusCode(monitor: MonitorDetail): string {
+  if (monitor.msg) return monitor.msg;
+  if (monitor.status === 'up') return '200 OK';
+  if (monitor.status === 'down') return 'Down';
+  return '—';
+}
 
 function formatLastChecked(lastCheckedAt: string | null): string {
   if (!lastCheckedAt) return '—';
   try {
     const date = new Date(lastCheckedAt);
     if (isNaN(date.getTime())) return lastCheckedAt;
-    return date.toLocaleString([], {
+    return date.toLocaleString('fr-FR', {
       day: '2-digit',
       month: '2-digit',
       year: 'numeric',
@@ -76,136 +85,99 @@ function formatLastChecked(lastCheckedAt: string | null): string {
   }
 }
 
-// Clean URL for concise display by stripping protocol
-function cleanUrl(url: string): string {
-  if (!url) return '—';
-  return url.replace(/^https?:\/\//i, '').replace(/\/$/, '');
+function formatSSLExpiry(validTo: string | null): string {
+  if (!validTo) return 'Non disponible';
+  try {
+    const date = new Date(validTo);
+    if (isNaN(date.getTime())) return validTo;
+    return date.toLocaleString('fr-FR', {
+      day: '2-digit',
+      month: '2-digit',
+      year: 'numeric',
+      hour: '2-digit',
+      minute: '2-digit',
+    });
+  } catch {
+    return validTo;
+  }
 }
 
-// ─── Config Row ─────────────────────────────────────────────────────────────
-const ConfigRow: React.FC<{ label: string; value: string; last?: boolean; valueColor?: string }> = ({
+function formatResponseTimeShort(avgPing: number | null): string {
+  if (avgPing == null) return '—';
+  if (avgPing >= 1000) return `${(avgPing / 1000).toFixed(2)} s`;
+  return `${avgPing.toFixed(2)} ms`;
+}
+
+// ─── Timeline Heartbeats Component ───────────────────────────────────────────
+const HeartbeatTimeline = memo<{ history: HeartbeatPoint[] }>(({ history }) => {
+  const TOTAL = 24;
+  const recent = history && history.length > 0 ? history.slice(-TOTAL) : [];
+  const blocks: (HeartbeatPoint | null)[] = Array(TOTAL).fill(null);
+
+  for (let i = 0; i < recent.length; i++) {
+    const src = recent[recent.length - 1 - i];
+    blocks[TOTAL - 1 - i] = src;
+  }
+
+  return (
+    <View style={s.heartbeatWrapper}>
+      <View style={s.heartbeatContainer}>
+        {blocks.map((h, index) => {
+          const status = h ? (h.status as MonitorStatus) : null;
+          const bg = status ? (STATUS_COLOR[status] || C.red) : '#E2E8F0';
+          return <View key={index} style={[s.heartbeatBar, { backgroundColor: bg }]} />;
+        })}
+      </View>
+      <View style={s.heartbeatLegend}>
+        <Text style={s.heartbeatLegendText}>Il y a 24 checks</Text>
+        <Text style={s.heartbeatLegendText}>Maintenant</Text>
+      </View>
+    </View>
+  );
+});
+
+// ─── Config Row ───────────────────────────────────────────────────────────────
+const ConfigRow: React.FC<{ label: string; value: string; last?: boolean }> = ({
   label,
   value,
   last,
-  valueColor,
 }) => (
-  <View style={[s.configRow, last && s.configRowLast]}>
+  <View style={[s.configRow, !last && s.configRowBorder]}>
     <Text style={s.configLabel}>{label}</Text>
-    <Text
-      style={[s.configValue, valueColor ? { color: valueColor } : undefined]}
-      numberOfLines={1}
-      ellipsizeMode="middle"
-    >
-      {value}
-    </Text>
+    <Text style={s.configValue} numberOfLines={1} ellipsizeMode="tail">{value}</Text>
   </View>
 );
 
-// ─── Status Dropdown Component ──────────────────────────────────────────────
-const StatusDropdown = ({
-  monitorId,
-  currentStatus,
-  active,
-  onChanged,
-  hasIncident,
-  onResolve,
-  resolving,
-}: {
-  monitorId: number | string;
-  currentStatus: MonitorStatus;
-  active: boolean;
-  onChanged: () => void;
-  hasIncident: boolean;
-  onResolve: () => void;
-  resolving: boolean;
-}) => {
-  const [isOpen, setIsOpen] = useState(false);
-  const [pending, setPending] = useState(false);
-
-  const isMaintenance = currentStatus === 'maintenance' || !active;
-  const bgColor = isMaintenance ? '#8B5CF6' : C.red;
-  const label = isMaintenance ? 'Maintenance' : 'Down';
-
-  const handleSelect = async (next: 'Down' | 'Maintenance') => {
-    setIsOpen(false);
-    if ((next === 'Maintenance') === isMaintenance) return;
-    setPending(true);
-    try {
-      if (next === 'Maintenance') {
-        await pausePage(monitorId);
-        toastiva.success('Passé en maintenance');
-      } else {
-        await resumePage(monitorId);
-        toastiva.success('Maintenance terminée (site actif)');
-      }
-      onChanged();
-    } catch (err) {
-      toastiva.error('Échec de la modification du statut');
-      console.warn('[StatusDropdown] échec du changement de statut:', err);
-    } finally {
-      setPending(false);
-    }
-  };
-
-  const handleResolve = () => {
-    setIsOpen(false);
-    onResolve();
-  };
-
-  const isLoading = pending || resolving;
-
+// ─── Progress Row (Barres Statistiques) ──────────────────────────────────────
+const ProgressRow: React.FC<{
+  label: string;
+  percent: number;
+  leftText: string;
+  rightText: string;
+  percentDisplay?: string;
+  barColor?: string;
+}> = ({ label, percent, leftText, rightText, percentDisplay, barColor = C.primary }) => {
+  const clamped = Math.max(0, Math.min(100, percent));
   return (
-    <View style={{ position: 'relative', zIndex: 10 }}>
-      {/* Largeur fixe (148px) : ne change pas selon le label affiché */}
-      <TouchableOpacity
-        style={[s.dropdownButton, { backgroundColor: bgColor, opacity: isLoading ? 0.6 : 1, width: 148 }]}
-        onPress={() => setIsOpen(!isOpen)}
-        disabled={isLoading}
-        activeOpacity={0.8}
-      >
-        {isLoading ? (
-          <ActivityIndicator size="small" color="#FFF" />
-        ) : (
-          <ChevronDown color="#FFF" size={16} />
-        )}
-        <Text style={s.dropdownButtonText}>{label}</Text>
-      </TouchableOpacity>
-
-      {isOpen && (
-        <View style={s.dropdownMenu}>
-          <TouchableOpacity onPress={() => handleSelect('Down')} style={s.dropdownMenuItem}>
-            <Text style={s.dropdownMenuItemText}>Down</Text>
-          </TouchableOpacity>
-          <TouchableOpacity onPress={() => handleSelect('Maintenance')} style={[s.dropdownMenuItem, { borderTopWidth: 1, borderTopColor: C.cardBorder }]}>
-            <Text style={s.dropdownMenuItemText}>Maintenance</Text>
-          </TouchableOpacity>
-          {hasIncident && (
-            <TouchableOpacity onPress={handleResolve} style={[s.dropdownMenuItem, { borderTopWidth: 1, borderTopColor: C.cardBorder }]}>
-              <Text style={[s.dropdownMenuItemText, { color: '#4ADE80' }]}>✓ Résolu</Text>
-            </TouchableOpacity>
-          )}
-        </View>
-      )}
+    <View style={s.progressRow}>
+      <View style={s.progressHeaderRow}>
+        <Text style={s.progressLabel}>{label}</Text>
+        <Text style={[s.progressPercent, { color: barColor }]}>
+          {percentDisplay || `${Math.round(clamped)}%`}
+        </Text>
+      </View>
+      <View style={s.progressTrack}>
+        <View style={[s.progressFill, { width: `${clamped}%`, backgroundColor: barColor }]} />
+      </View>
+      <View style={s.progressFooterRow}>
+        <Text style={s.progressFooterText}>{leftText}</Text>
+        <Text style={s.progressFooterText}>{rightText}</Text>
+      </View>
     </View>
   );
 };
 
-
-function formatIncidentDuration(minutes: number | undefined | null): string {
-  if (minutes == null) return '—';
-  const d = Math.floor(minutes / (24 * 60));
-  const h = Math.floor((minutes % (24 * 60)) / 60);
-  const m = Math.floor(minutes % 60);
-  let str = '';
-  if (d > 0) str += `${d}j `;
-  if (h > 0) str += `${h}h `;
-  str += `${m}min`;
-  return str.trim();
-}
-
-const { width: SCREEN_WIDTH } = Dimensions.get('window');
-const SIDEBAR_WIDTH = SCREEN_WIDTH * 0.78;
-
+// ─── Sidebar Item ─────────────────────────────────────────────────────────────
 const SidebarItem = ({ label, value }: { label: string; value: string }) => (
   <View style={s.sidebarItemRow}>
     <Text style={s.sidebarItemLabel}>{label}</Text>
@@ -213,24 +185,35 @@ const SidebarItem = ({ label, value }: { label: string; value: string }) => (
   </View>
 );
 
+/** Onglets de l'écran de détail (exporté pour la navigation depuis l'accueil). */
+export type DetailTabKey = 'incident' | 'session' | 'monitor' | 'stats';
+
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function MonitorDetailScreen({
   monitorId,
+  initialTab = 'incident',
   onBack,
 }: {
   monitorId: number | string;
+  /** Onglet ouvert à l'affichage (un groupe s'ouvre sur « Monitor »). */
+  initialTab?: DetailTabKey;
   onBack: () => void;
 }) {
+  const { width } = useWindowDimensions();
+  const SIDEBAR_WIDTH = width * 0.82;
+
   const [monitor, setMonitor] = useState<MonitorDetail | null>(null);
-  const [, setHistory] = useState<HeartbeatPoint[]>([]);
-  const [childrenPages, setChildrenPages] = useState<MonitorItem[]>([]);
+  const [history, setHistory] = useState<HeartbeatPoint[]>([]);
+  const [groupChildren, setGroupChildren] = useState<MonitorItem[]>([]);
+  const [childrenLoading, setChildrenLoading] = useState(false);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const isMounted = useRef(true);
-
-  // Sidebar
+  const [activeTab, setActiveTab] = useState<DetailTabKey>(initialTab);
   const [sidebarOpen, setSidebarOpen] = useState(false);
+  const isGroup = monitor?.type === 'group';
+
+  const isMounted = useRef(true);
   const slideAnim = useRef(new Animated.Value(SIDEBAR_WIDTH)).current;
   const fadeAnim = useRef(new Animated.Value(0)).current;
 
@@ -239,12 +222,12 @@ export default function MonitorDetailScreen({
     Animated.parallel([
       Animated.timing(slideAnim, {
         toValue: 0,
-        duration: 300,
+        duration: 250,
         useNativeDriver: true,
       }),
       Animated.timing(fadeAnim, {
-        toValue: 0.5,
-        duration: 300,
+        toValue: 0.4,
+        duration: 250,
         useNativeDriver: true,
       }),
     ]).start();
@@ -254,12 +237,12 @@ export default function MonitorDetailScreen({
     Animated.parallel([
       Animated.timing(slideAnim, {
         toValue: SIDEBAR_WIDTH,
-        duration: 250,
+        duration: 200,
         useNativeDriver: true,
       }),
       Animated.timing(fadeAnim, {
         toValue: 0,
-        duration: 250,
+        duration: 200,
         useNativeDriver: true,
       }),
     ]).start(() => {
@@ -271,23 +254,34 @@ export default function MonitorDetailScreen({
     async (isRefresh = false) => {
       if (isRefresh) setRefreshing(true);
       try {
-        const [detailData, monitorsData] = await Promise.all([
-          getMonitorDetail(monitorId),
-          getMonitors()
-        ]);
+        const data = await getMonitorDetail(monitorId);
         if (!isMounted.current) return;
-        setMonitor(detailData.monitor);
-        setHistory(detailData.history);
-        
-        const groupChildren = monitorsData.monitors.filter(m => String(m.parent) === String(monitorId));
-        setChildrenPages(groupChildren);
-        
+        setMonitor(data.monitor);
+        setHistory(data.history);
         setError(null);
+
+        if (data.monitor.type === 'group') {
+          // Le relay n'expose pas de route dédiée aux sous-moniteurs d'un
+          // groupe : on réutilise la liste complète des monitors et on garde
+          // ceux dont `parent` pointe vers ce groupe.
+          setChildrenLoading(true);
+          try {
+            const { monitors } = await getMonitors();
+            if (!isMounted.current) return;
+            setGroupChildren(monitors.filter((item) => item.parent === data.monitor.id));
+          } catch (childrenError) {
+            if (!isMounted.current) return;
+            setGroupChildren([]);
+            console.warn('[MonitorDetailScreen] sous-moniteurs indisponibles:', childrenError);
+          } finally {
+            if (isMounted.current) setChildrenLoading(false);
+          }
+        } else {
+          setGroupChildren([]);
+        }
       } catch (err) {
         if (!isMounted.current) return;
-        const msg = err instanceof RelayError ? err.message : 'Erreur lors du chargement.';
-        setError(msg);
-        toastiva.error(msg);
+        setError(err instanceof RelayError ? err.message : 'Erreur lors du chargement.');
       } finally {
         if (!isMounted.current) return;
         setLoading(false);
@@ -305,65 +299,114 @@ export default function MonitorDetailScreen({
     };
   }, [fetchDetail]);
 
-  const isGroup = monitor?.type === 'group';
-  const [resolving, setResolving] = useState(false);
+  const tabs: { id: DetailTabKey; label: string }[] = [
+    { id: 'incident', label: 'Incident' },
+    { id: 'session', label: 'Record session' },
+    { id: 'monitor', label: 'Monitor' },
+    { id: 'stats', label: 'Statistique' },
+  ];
 
-  const handleResolve = () => {
-    if (!monitor || resolving) return;
+  const responseTimeScaleMs = 3500;
+  const pingPercent = monitor?.loadTimeMs
+    ? Math.min(100, Math.max(5, (monitor.loadTimeMs / responseTimeScaleMs) * 100))
+    : 0;
+  const uptimePercent = monitor?.uptime24h != null ? getAvailabilityPercent(monitor) : 100;
 
-    const siteName = monitor.parentName || monitor.name;
-    const siteId = monitor.parent ?? monitor.id;
+  /**
+   * Carte d'une sous-page d'un groupe.
+   * Le nom du monitor revient avec le domaine du site à côté
+   * (« Tarifs » + « markhorus.com »), et la ligne du dessous ne montre que la
+   * partie après le « .com » (« /tarifs », sans https://).
+   * L'indicateur de tendance reste à droite : pas de logo, pas de pourcentage
+   * et aucune navigation au toucher.
+   */
+  const renderChildRow = (child: MonitorItem) => {
+    const percent = getAvailabilityPercent(child);
+    const tone = getStatusTone(percent, child.status, STATUS_COLOR);
 
-    Alert.alert(
-      'Marquer le site comme résolu ?',
-      `Cette action concerne l'ensemble du site "${siteName}".\n\nLes vérifications automatiques seront réactivées au prochain cycle.\n\nNote : Si un problème persiste sur l'une des pages, l'incident sera de nouveau signalé au prochain check.`,
-      [
-        {
-          text: 'Annuler',
-          style: 'cancel',
-        },
-        {
-          text: 'Marquer comme résolu',
-          style: 'default',
-          onPress: async () => {
-            setResolving(true);
-            try {
-              await acknowledgeSite(siteId);
+    const { title, site, path } = getSubPageLabels(child);
 
-              toastiva.success('Site marqué comme résolu', {
-                description: 'La surveillance automatique a été réactivée pour ce site.',
-                duration: 4000,
-              });
+    return (
+      <View
+        key={child.id}
+        style={s.childRow}
+        accessible
+        accessibilityLabel={`${child.name}, disponibilité ${formatAvailabilityPercent(percent)}`}
+      >
+        <View style={s.childTexts}>
+          <View style={s.childTitleRow}>
+            <Text style={s.childName} numberOfLines={1}>{title}</Text>
+            {site && <Text style={s.childSite} numberOfLines={1}>{site}</Text>}
+          </View>
 
-              await fetchDetail(true);
-            } catch (err) {
-              const errorMessage = err instanceof RelayError ? err.message : "Erreur lors de la résolution de l'incident.";
-              setError(errorMessage);
-              toastiva.error('Échec de la résolution', {
-                description: errorMessage,
-              });
-            } finally {
-              setResolving(false);
-            }
-          },
-        },
-      ]
+          {path && <Text style={s.childPath} numberOfLines={1}>{path}</Text>}
+        </View>
+
+        <View style={[s.childTrendBadge, { backgroundColor: `${tone}22` }]}>
+          {tone === STATUS_COLOR.up ? (
+            <ArrowUp size={14} color={tone} strokeWidth={3} />
+          ) : (
+            <ArrowDown size={14} color={tone} strokeWidth={3} />
+          )}
+        </View>
+      </View>
     );
   };
 
   return (
-    <SafeAreaView style={s.container}>
+    <SafeAreaView style={s.container} edges={['top', 'left', 'right']}>
       {/* ── Top Navigation Bar ── */}
       <View style={s.headerRow}>
-        <TouchableOpacity style={s.backButton} onPress={onBack} activeOpacity={0.7}>
-          <ArrowLeft size={22} color={C.white} />
+        <TouchableOpacity
+          style={s.headerBtn}
+          onPress={onBack}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Retour"
+        >
+          <ChevronLeft size={26} color={C.textDark} strokeWidth={2.5} />
         </TouchableOpacity>
-        <Text style={s.headerTitle}>{isGroup || !monitor ? 'Détails' : 'Incident View'}</Text>
-        <TouchableOpacity style={s.infoButton} onPress={openSidebar} activeOpacity={0.7}>
-          <Menu size={22} color={C.white} />
+
+        <Text style={s.headerTitle}>Details</Text>
+
+        <TouchableOpacity
+          style={s.headerBtn}
+          onPress={openSidebar}
+          activeOpacity={0.7}
+          accessibilityRole="button"
+          accessibilityLabel="Ouvrir les informations avancées"
+        >
+          <MoreHorizontal size={24} color={C.textDark} />
         </TouchableOpacity>
       </View>
 
+      {/* ── Horizontal Tab Bar ─ */}
+      <View style={s.tabBarContainer}>
+        <ScrollView
+          horizontal
+          showsHorizontalScrollIndicator={false}
+          contentContainerStyle={s.tabScrollContent}
+        >
+          {tabs.map((tab) => {
+            const isActive = activeTab === tab.id;
+            return (
+              <TouchableOpacity
+                key={tab.id}
+                style={s.tabItem}
+                onPress={() => setActiveTab(tab.id)}
+                activeOpacity={0.7}
+              >
+                <Text style={[s.tabText, isActive && s.tabTextActive]}>
+                  {tab.label}
+                </Text>
+                {isActive && <View style={s.activeIndicator} />}
+              </TouchableOpacity>
+            );
+          })}
+        </ScrollView>
+      </View>
+
+      {/* ── Screen Body Content ── */}
       <ScrollView
         contentContainerStyle={s.scrollContent}
         showsVerticalScrollIndicator={false}
@@ -371,20 +414,18 @@ export default function MonitorDetailScreen({
           <RefreshControl
             refreshing={refreshing}
             onRefresh={() => fetchDetail(true)}
-            tintColor={C.green}
-            colors={[C.green]}
+            tintColor={C.primary}
+            colors={[C.primary]}
           />
         }
       >
-        {/* Loading State */}
         {loading && !monitor && (
           <View style={s.centered}>
-            <ActivityIndicator size="large" color={C.green} />
-            <Text style={s.emptyText}>Chargement...</Text>
+            <ActivityIndicator size="large" color={C.primary} />
+            <Text style={s.emptyText}>Chargement des données...</Text>
           </View>
         )}
 
-        {/* Error State */}
         {error && !monitor && (
           <View style={s.centered}>
             <Text style={s.errorText}>{error}</Text>
@@ -396,127 +437,106 @@ export default function MonitorDetailScreen({
 
         {monitor && (
           <>
-            {monitor.type === 'group' ? (
+            {/* ── Tab: Incident ── */}
+            {activeTab === 'incident' && (
               <>
-                <View style={s.card}>
-                  <Text style={s.cardTitle}>Résumé du Groupe</Text>
-                  <ConfigRow label="Nom du groupe:" value={monitor.name} />
-                  <ConfigRow label="Client:" value={monitor.clientName || '—'} />
-                  <ConfigRow label="Responsable:" value={monitor.assignee || '—'} />
-                  <ConfigRow label="Pages vérifiées:" value={String(childrenPages.length)} last />
-                </View>
-
-                {childrenPages.length > 0 && (
+                {(monitor.url || monitor.hostname) && (
                   <View style={s.card}>
-                    <Text style={s.cardTitle}>Pages du groupe</Text>
-                    {childrenPages.map((child, index) => {
-                      const hasError = child.status !== 'up' || !!child.msg;
-                      return (
-                        <View key={child.id} style={[s.childRowContainer, index !== childrenPages.length - 1 && s.childRowBorder]}>
-                          <View style={s.childRow}>
-                            <Text style={s.childName} numberOfLines={1}>
-                              {cleanUrl(child.url || child.name)}
-                            </Text>
-                            <View style={s.childStatusBadge}>
-                              <View style={[s.childStatusDot, { backgroundColor: STATUS_COLOR[child.status] || C.muted }]} />
-                              <Text style={[s.childStatusText, { color: STATUS_COLOR[child.status] || C.muted }]}>
-                                {child.status === 'up' ? 'Online' : child.status === 'down' ? 'Offline' : child.status}
-                              </Text>
-                            </View>
-                          </View>
-                          {hasError && child.msg ? (
-                            <View style={s.childCauseBox}>
-                              <Text style={s.childCauseText}>{child.msg}</Text>
-                            </View>
-                          ) : null}
-                        </View>
-                      );
-                    })}
+                    <Text style={s.cardTitle}>Server Properties</Text>
+                    <ConfigRow label="URL" value={monitor.url || monitor.hostname || '—'} />
+                    <ConfigRow label="Status code" value={formatStatusCode(monitor)} last />
                   </View>
                 )}
+
+                <View style={s.card}>
+                  <Text style={s.cardTitle}>Incidents récents</Text>
+                  <View style={s.emptyStateBox}>
+                    <CheckCircle2 size={36} color={C.green} />
+                    <Text style={s.emptyStateTitle}>Aucun incident en cours</Text>
+                    <Text style={s.emptyStateSub}>
+                      Tous les services fonctionnent correctement.
+                    </Text>
+                  </View>
+                </View>
               </>
-            ) : (
-              <View style={[s.card, { marginTop: 12 }]}>
-                <View style={s.incidentViewRow}>
-                  <Text style={s.incidentViewLabel}>URL:</Text>
-                  <Text style={[s.incidentViewValue, { color: STATUS_COLOR[monitor.status] || C.white }]} numberOfLines={1}>
-                    {cleanUrl(monitor.url || monitor.hostname || '')}
+            )}
+
+            {/* ── Tab: Record session ── */}
+            {activeTab === 'session' && (
+              <View style={s.card}>
+                <Text style={s.cardTitle}>Enregistrement de session</Text>
+                <View style={s.emptyStateBox}>
+                  <Clock size={36} color={C.mutedLight} />
+                  <Text style={s.emptyStateTitle}>Aucune session enregistrée</Text>
+                  <Text style={s.emptyStateSub}>
+                    Les enregistrements d'exécution s'afficheront ici.
                   </Text>
                 </View>
-                
-                <View style={s.incidentViewRow}>
-                  <Text style={s.incidentViewLabel}>Group:</Text>
-                  <Text style={s.incidentViewValue}>{monitor.parentName || '—'}</Text>
-                </View>
+              </View>
+            )}
 
-                {(() => {
-                  const latestIncident = monitor.recentIncidents?.[0];
-                  const hasIncident = !!latestIncident;
+            {/* ── Tab: Monitor ── */}
+            {activeTab === 'monitor' && (
+              <>
+                {isGroup && (
+                  <View style={s.card}>
+                    <Text style={s.cardTitle}>{`Sous-moniteurs (${groupChildren.length})`}</Text>
 
-                  // Extraction prioritaire de la note depuis lastCrawlReport (Supabase page_checks) ou monitor.msg
-                  let causeText = monitor.msg || '';
-
-                  if (monitor.lastCrawlReport) {
-                    try {
-                      const report = typeof monitor.lastCrawlReport === 'string'
-                        ? JSON.parse(monitor.lastCrawlReport)
-                        : monitor.lastCrawlReport;
-                      if (Array.isArray(report)) {
-                        const itemWithNote = report.find((r: any) => r.note && String(r.note).trim() !== '');
-                        if (itemWithNote?.note) {
-                          causeText = itemWithNote.note;
-                        }
-                      }
-                    } catch (e) {}
-                  }
-
-                  if (!causeText && hasIncident) {
-                    causeText = latestIncident.title;
-                  }
-
-                  if (!causeText) {
-                    causeText = 'Aucune erreur détectée';
-                  }
-
-                  return (
-                    <>
-                      <View style={[s.incidentViewRow, { marginTop: 16 }]}>
-                        <Text style={s.incidentViewLabel}>Incident signalé:</Text>
-                        <Text style={s.incidentViewValue}>
-                          {hasIncident ? formatLastChecked(latestIncident.startedAt) : '—'}
+                    {childrenLoading ? (
+                      <ActivityIndicator color={C.primary} />
+                    ) : groupChildren.length === 0 ? (
+                      <View style={s.emptyStateBox}>
+                        <Layers size={36} color={C.mutedLight} />
+                        <Text style={s.emptyStateTitle}>Aucun sous-moniteur</Text>
+                        <Text style={s.emptyStateSub}>
+                          Ce groupe ne contient encore aucun monitor.
                         </Text>
                       </View>
-                      
-                      <View style={s.incidentViewRow}>
-                        <Text style={s.incidentViewLabel}>Durée:</Text>
-                        <Text style={s.incidentViewValue}>
-                          {hasIncident ? `${formatIncidentDuration(latestIncident.durationMinutes)} (en cours)` : '—'}
-                        </Text>
+                    ) : (
+                      <View style={s.childrenList}>
+                        {groupChildren.map((child) => renderChildRow(child))}
                       </View>
+                    )}
+                  </View>
+                )}
 
-                      <View style={[s.incidentViewRow, { flexDirection: 'column', alignItems: 'flex-start', marginTop: 16 }]}>
-                        <Text style={[s.incidentViewLabel, { marginBottom: 8 }]}>Cause:</Text>
-                        <View style={s.incidentCauseBox}>
-                          <Text style={s.incidentCauseText}>
-                            {causeText}
-                          </Text>
-                        </View>
-                      </View>
-                    </>
-                  );
-                })()}
-
-                <View style={[s.incidentDropdownContainer, { flexDirection: 'row', justifyContent: 'flex-end' }]}>
-                  <StatusDropdown
-                    monitorId={monitor.id}
-                    currentStatus={monitor.status}
-                    active={monitor.active}
-                    onChanged={() => fetchDetail(true)}
-                    hasIncident={!!monitor.recentIncidents?.[0]}
-                    onResolve={handleResolve}
-                    resolving={resolving}
-                  />
+                <View style={s.card}>
+                  <Text style={s.cardTitle}>Monitoring</Text>
+                  <ConfigRow label="client:" value={monitor.clientName || '—'} />
+                  <ConfigRow label="groupe:" value={monitor.parentName || monitor.name} />
+                  <ConfigRow label="url:" value={monitor.url || monitor.hostname || '—'} />
+                  <ConfigRow label="responsable:" value={monitor.assignee || 'DevOps Team'} />
+                  <ConfigRow label="dernier check:" value={formatLastChecked(monitor.lastCheckedAt)} />
+                  <ConfigRow label="exp ssl:" value={formatSSLExpiry(monitor.sslValidTo)} last />
                 </View>
+
+                <View style={s.card}>
+                  <Text style={s.cardTitle}>Recent Heartbeats</Text>
+                  <HeartbeatTimeline history={history} />
+                </View>
+              </>
+            )}
+
+            {/* ── Tab: Statistique ── */}
+            {activeTab === 'stats' && (
+              <View style={s.card}>
+                <Text style={s.cardTitle}>Statistiques</Text>
+                <ProgressRow
+                  label="Disponibilité moyenne :"
+                  percent={uptimePercent}
+                  leftText="0%"
+                  rightText="100%"
+                  percentDisplay={`${Math.round(uptimePercent)}%`}
+                  barColor={C.green}
+                />
+                <ProgressRow
+                  label="Temps de réponse :"
+                  percent={pingPercent}
+                  leftText={formatResponseTimeShort(monitor.loadTimeMs)}
+                  rightText="3.52 s"
+                  percentDisplay={`${Math.round(pingPercent)}%`}
+                  barColor={C.primary}
+                />
               </View>
             )}
           </>
@@ -526,19 +546,29 @@ export default function MonitorDetailScreen({
       {/* ── Backdrop Overlay ── */}
       {sidebarOpen && (
         <Animated.View style={[s.backdrop, { opacity: fadeAnim }]} pointerEvents="auto">
-          <TouchableOpacity style={StyleSheet.absoluteFill} onPress={closeSidebar} activeOpacity={1} />
+          <TouchableOpacity
+            style={StyleSheet.absoluteFill}
+            onPress={closeSidebar}
+            activeOpacity={1}
+          />
         </Animated.View>
       )}
 
-      {/* ── Sidebar Sheet ── */}
+      {/* ── Sidebar Drawer ── */}
       {sidebarOpen && (
         <Animated.View
           style={[s.sidebar, { width: SIDEBAR_WIDTH, transform: [{ translateX: slideAnim }] }]}
         >
           <View style={s.sidebarHeader}>
-            <Text style={s.sidebarTitle}>Infos Monitor</Text>
-            <TouchableOpacity onPress={closeSidebar} activeOpacity={0.7} style={s.sidebarCloseBtn}>
-              <X size={20} color={C.white} />
+            <Text style={s.sidebarTitle}>Informations avancées</Text>
+            <TouchableOpacity
+              onPress={closeSidebar}
+              activeOpacity={0.7}
+              style={s.sidebarCloseBtn}
+              accessibilityRole="button"
+              accessibilityLabel="Fermer le panneau latéral"
+            >
+              <X size={22} color={C.textDark} />
             </TouchableOpacity>
           </View>
 
@@ -546,32 +576,22 @@ export default function MonitorDetailScreen({
             {monitor && (
               <>
                 <SidebarItem label="Nom" value={monitor.name} />
-                <SidebarItem label="Type" value={monitor.type} />
+                <SidebarItem label="Type de monitor" value={monitor.type} />
                 {(monitor.url || monitor.hostname) && (
                   <SidebarItem label="URL / Hôte" value={monitor.url || monitor.hostname || '—'} />
                 )}
-                {monitor.port != null && (
-                  <SidebarItem label="Port" value={String(monitor.port)} />
-                )}
+                {monitor.port != null && <SidebarItem label="Port" value={String(monitor.port)} />}
                 <SidebarItem label="Intervalle" value={`${monitor.interval ?? 60} secondes`} />
                 {monitor.retryInterval != null && (
-                  <SidebarItem label="Retry Interval" value={`${monitor.retryInterval} secondes`} />
+                  <SidebarItem label="Intervalle de réessai" value={`${monitor.retryInterval} secondes`} />
                 )}
-                {monitor.parentName && (
-                  <SidebarItem label="Groupe parent" value={monitor.parentName} />
-                )}
-                <SidebarItem label="Statut" value={monitor.active ? 'Actif' : 'En pause'} />
-                {monitor.sslValidTo || monitor.sslDaysRemaining != null ? (
+                {monitor.parentName && <SidebarItem label="Groupe parent" value={monitor.parentName} />}
+                <SidebarItem label="État" value={monitor.active ? 'Actif' : 'Inactif / Pausé'} />
+                {monitor.sslValidTo ? (
                   <>
-                    {monitor.sslValidTo && (
-                      <SidebarItem label="SSL Valide jusqu'à" value={monitor.sslValidTo} />
-                    )}
-                    {monitor.sslDaysRemaining != null && (
-                      <SidebarItem label="Jours SSL restants" value={`${monitor.sslDaysRemaining} jours`} />
-                    )}
-                    {monitor.sslIssuer && (
-                      <SidebarItem label="Émetteur SSL" value={monitor.sslIssuer} />
-                    )}
+                    <SidebarItem label="SSL valide jusqu'au" value={monitor.sslValidTo} />
+                    <SidebarItem label="Jours SSL restants" value={`${monitor.sslDaysRemaining ?? 0} jours`} />
+                    {monitor.sslIssuer && <SidebarItem label="Émetteur SSL" value={monitor.sslIssuer} />}
                   </>
                 ) : (
                   <SidebarItem label="Certificat SSL" value="Aucun" />
@@ -591,71 +611,238 @@ const s = StyleSheet.create({
     flex: 1,
     backgroundColor: C.bg,
   },
+
+  // ── Top Navigation Bar ─
   headerRow: {
+    height: 56,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 16,
-    paddingTop: 8,
-    paddingBottom: 12,
+    paddingHorizontal: 8,
+    backgroundColor: C.bg,
   },
-  backButton: {
-    width: 36,
-    height: 36,
+  headerBtn: {
+    width: 44,
+    height: 44,
     justifyContent: 'center',
+    alignItems: 'center',
   },
   headerTitle: {
-    color: C.white,
-    fontSize: 16,
-    fontWeight: '600',
+    color: C.textDark,
+    fontSize: 18,
+    fontWeight: '700',
+    letterSpacing: 0.2,
   },
-  infoButton: {
-    width: 36,
-    height: 36,
-    justifyContent: 'center',
-    alignItems: 'flex-end',
+
+  // ── Horizontal Tab Bar (fidèle à la maquette) ──
+  tabBarContainer: {
+    backgroundColor: C.bg,
+    borderBottomWidth: 1,
+    borderBottomColor: '#F1F5F9',
   },
+  tabScrollContent: {
+    paddingHorizontal: 20,
+    gap: 24,
+    paddingVertical: 4,
+  },
+  tabItem: {
+    paddingVertical: 14,
+    alignItems: 'center',
+    position: 'relative',
+    minWidth: 60,
+  },
+  tabText: {
+    fontSize: 15,
+    fontWeight: '500',
+    color: C.textDark,
+  },
+  tabTextActive: {
+    color: C.primary,
+    fontWeight: '700',
+  },
+  activeIndicator: {
+    position: 'absolute',
+    bottom: 0,
+    left: 0,
+    right: 0,
+    height: 3,
+    backgroundColor: C.primary,
+    borderRadius: 2,
+  },
+
+  // ── Scroll Content ──
   scrollContent: {
-    paddingHorizontal: 16,
-    paddingTop: 4,
-    paddingBottom: 24,
-    gap: 14,
-  },
-  card: {
-    backgroundColor: 'transparent',
-    borderRadius: 8,
     padding: 16,
-    borderColor: '#334155',
+    gap: 16,
+  },
+
+  // ── Cards ──
+  card: {
+    backgroundColor: C.card,
+    borderRadius: 12,
+    padding: 16,
     borderWidth: 1,
+    borderColor: C.cardBorder,
   },
   cardTitle: {
-    color: C.white,
-    fontSize: 15,
-    fontWeight: '600',
-    marginBottom: 16,
+    color: C.textDark,
+    fontSize: 16,
+    fontWeight: '700',
+    marginBottom: 14,
   },
+
+  // ── Config Rows ─
   configRow: {
     flexDirection: 'row',
     justifyContent: 'space-between',
     alignItems: 'center',
-    marginBottom: 12,
+    paddingVertical: 11,
   },
-  configRowLast: {
-    marginBottom: 0,
+  configRowBorder: {
+    borderBottomWidth: 1,
+    borderBottomColor: C.cardBorder,
   },
   configLabel: {
     color: C.muted,
-    fontSize: 13,
-    flexShrink: 0,
-    marginRight: 8,
+    fontSize: 14,
   },
   configValue: {
-    color: C.white,
-    fontSize: 13,
-    fontWeight: '400',
-    flex: 1,
+    color: C.textDark,
+    fontSize: 14,
+    fontWeight: '500',
+    maxWidth: '65%',
     textAlign: 'right',
   },
+
+  // ── Sous-pages d'un groupe (onglet Monitor) ──
+  childrenList: {
+    gap: 8,
+  },
+  childRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    backgroundColor: '#FFFFFF',
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+    borderRadius: 10,
+    paddingVertical: 12,
+    paddingHorizontal: 12,
+  },
+  childTexts: {
+    flex: 1,
+    gap: 2,
+  },
+  childTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+  },
+  childName: {
+    flexShrink: 1,
+    color: C.textDark,
+    fontSize: 14,
+    fontWeight: '600',
+  },
+  childSite: {
+    color: C.muted,
+    fontSize: 12,
+  },
+  childPath: {
+    color: C.muted,
+    fontSize: 12,
+  },
+  childTrendBadge: {
+    width: 34,
+    height: 22,
+    borderRadius: 11,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+
+
+  // ── Heartbeats Bar Visual ─
+  heartbeatWrapper: {
+    marginTop: 4,
+  },
+  heartbeatContainer: {
+    flexDirection: 'row',
+    gap: 4,
+    alignItems: 'center',
+    height: 28,
+  },
+  heartbeatBar: {
+    flex: 1,
+    height: '100%',
+    borderRadius: 3,
+  },
+  heartbeatLegend: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 8,
+  },
+  heartbeatLegendText: {
+    fontSize: 11,
+    color: C.mutedLight,
+  },
+
+  // ── Progress Rows (Stats) ──
+  progressRow: {
+    marginBottom: 16,
+  },
+  progressHeaderRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginBottom: 6,
+  },
+  progressLabel: {
+    color: C.textDark,
+    fontSize: 14,
+    fontWeight: '500',
+  },
+  progressPercent: {
+    fontSize: 14,
+    fontWeight: '700',
+  },
+  progressTrack: {
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#E2E8F0',
+    overflow: 'hidden',
+  },
+  progressFill: {
+    height: '100%',
+    borderRadius: 4,
+  },
+  progressFooterRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    marginTop: 6,
+  },
+  progressFooterText: {
+    color: C.muted,
+    fontSize: 12,
+  },
+
+  // ── Empty States ──
+  emptyStateBox: {
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingVertical: 24,
+    gap: 8,
+  },
+  emptyStateTitle: {
+    color: C.textDark,
+    fontSize: 15,
+    fontWeight: '600',
+  },
+  emptyStateSub: {
+    color: C.muted,
+    fontSize: 13,
+    textAlign: 'center',
+  },
+
+  // ── Centered Loaders & Errors ─
   centered: {
     alignItems: 'center',
     justifyContent: 'center',
@@ -664,112 +851,25 @@ const s = StyleSheet.create({
   },
   emptyText: {
     color: C.muted,
-    fontSize: 13,
+    fontSize: 14,
   },
   errorText: {
     color: C.red,
-    fontSize: 13,
+    fontSize: 14,
     textAlign: 'center',
   },
   retryBtn: {
-    backgroundColor: C.card,
-    borderRadius: 10,
+    backgroundColor: C.primary,
+    borderRadius: 8,
     paddingVertical: 10,
-    paddingHorizontal: 24,
-    borderWidth: 1,
-    borderColor: C.cardBorder,
+    paddingHorizontal: 20,
   },
   retryBtnText: {
-    color: C.white,
-    fontSize: 14,
+    color: '#FFFFFF',
     fontWeight: '600',
   },
 
-  // ── Incident View Styles ──
-  incidentViewRow: {
-    flexDirection: 'row',
-    justifyContent: 'flex-start',
-    alignItems: 'center',
-    marginBottom: 12,
-  },
-  incidentViewLabel: {
-    color: C.white,
-    fontSize: 14,
-    fontWeight: '600',
-    width: 130,
-  },
-  incidentViewValue: {
-    color: C.white,
-    fontSize: 14,
-    flex: 1,
-  },
-  incidentCauseBox: {
-    backgroundColor: '#0F171E',
-    borderColor: '#1E2C3A',
-    borderWidth: 1,
-    borderRadius: 8,
-    padding: 16,
-    width: '100%',
-    minHeight: 80,
-  },
-  incidentCauseText: {
-    color: C.white,
-    fontSize: 14,
-    lineHeight: 20,
-  },
-  incidentDropdownContainer: {
-    alignItems: 'flex-end',
-    marginTop: 20,
-    marginBottom: 8,
-  },
-  dropdownButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 6,
-    gap: 8,
-  },
-  resolveButton: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    paddingHorizontal: 16,
-    paddingVertical: 10,
-    borderRadius: 6,
-    gap: 8,
-    backgroundColor: C.green,
-  },
-  dropdownButtonText: {
-    color: '#FFF',
-    fontWeight: 'bold',
-    fontSize: 14,
-  },
-  dropdownMenu: {
-    position: 'absolute',
-    top: '100%',
-    right: 0,
-    backgroundColor: C.card,
-    borderRadius: 6,
-    borderColor: C.cardBorder,
-    borderWidth: 1,
-    marginTop: 4,
-    width: 140,
-    shadowColor: '#000',
-    shadowOffset: { width: 0, height: 4 },
-    shadowOpacity: 0.3,
-    shadowRadius: 4,
-    elevation: 5,
-  },
-  dropdownMenuItem: {
-    padding: 12,
-  },
-  dropdownMenuItemText: {
-    color: C.white,
-    fontSize: 14,
-    textAlign: 'center',
-  },
-
-  // ── Sidebar ──
+  // ── Sidebar Drawer ──
   backdrop: {
     ...StyleSheet.absoluteFill,
     backgroundColor: '#000000',
@@ -780,16 +880,15 @@ const s = StyleSheet.create({
     top: 0,
     bottom: 0,
     right: 0,
-    backgroundColor: '#16212B',
+    backgroundColor: C.bg,
     borderLeftWidth: 1,
     borderLeftColor: C.cardBorder,
-    paddingTop: 52,
+    paddingTop: 48,
     zIndex: 999,
-    shadowColor: '#000000',
-    shadowOpacity: 0.6,
-    shadowRadius: 12,
-    shadowOffset: { width: -6, height: 0 },
-    elevation: 20,
+    shadowColor: '#000',
+    shadowOpacity: 0.15,
+    shadowRadius: 10,
+    elevation: 10,
   },
   sidebarHeader: {
     flexDirection: 'row',
@@ -799,89 +898,35 @@ const s = StyleSheet.create({
     paddingBottom: 16,
     borderBottomWidth: 1,
     borderBottomColor: C.cardBorder,
-    marginBottom: 8,
   },
   sidebarTitle: {
-    color: C.white,
-    fontSize: 15,
+    color: C.textDark,
+    fontSize: 16,
     fontWeight: '700',
-    letterSpacing: 0.2,
   },
   sidebarCloseBtn: {
     padding: 4,
-    opacity: 0.7,
   },
   sidebarContent: {
     paddingHorizontal: 20,
     paddingTop: 8,
     paddingBottom: 40,
-    gap: 0,
   },
   sidebarItemRow: {
     paddingVertical: 14,
     borderBottomWidth: 1,
-    borderBottomColor: '#1E2C3A',
+    borderBottomColor: C.cardBorder,
   },
   sidebarItemLabel: {
     color: C.muted,
-    fontSize: 10,
+    fontSize: 11,
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
-    marginBottom: 5,
+    letterSpacing: 0.5,
+    marginBottom: 4,
   },
   sidebarItemValue: {
-    color: C.white,
-    fontSize: 13,
-    fontWeight: '500',
-  },
-  
-  // ── Pages du groupe ──
-  childRowContainer: {
-    paddingVertical: 2,
-  },
-  childRow: {
-    flexDirection: 'row',
-    justifyContent: 'space-between',
-    alignItems: 'center',
-    paddingVertical: 10,
-  },
-  childRowBorder: {
-    borderBottomWidth: 1,
-    borderBottomColor: '#1E2C3A',
-  },
-  childName: {
-    color: C.white,
+    color: C.textDark,
     fontSize: 14,
     fontWeight: '500',
-    flex: 1,
-    paddingRight: 10,
-  },
-  childStatusBadge: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-  },
-  childStatusDot: {
-    width: 6,
-    height: 6,
-    borderRadius: 3,
-  },
-  childStatusText: {
-    fontSize: 12,
-    fontWeight: '500',
-  },
-  childCauseBox: {
-    backgroundColor: '#0F171E',
-    borderColor: '#1E2C3A',
-    borderWidth: 1,
-    borderRadius: 6,
-    padding: 10,
-    marginTop: 2,
-    marginBottom: 8,
-  },
-  childCauseText: {
-    color: '#F87171',
-    fontSize: 12,
-    lineHeight: 16,
   },
 });

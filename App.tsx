@@ -1,31 +1,126 @@
-import React, { useState } from 'react';
+import React, { useCallback, useState, useEffect } from 'react';
+import { Platform } from 'react-native';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
-import { PaperProvider } from 'react-native-paper';
+import { MD3DarkTheme, PaperProvider } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
 import { GestureHandlerRootView } from 'react-native-gesture-handler';
 import { ToastivaProvider } from 'toastiva';
 import HomeScreen from './src/screens/HomeScreen';
 import AddMonitorScreen from './src/screens/AddMonitorScreen';
-import MonitorDetailScreen from './src/screens/MonitorDetailScreen';
+import MonitorDetailScreen, { type DetailTabKey } from './src/screens/MonitorDetailScreen';
+import LoginScreen from './src/screens/LoginScreen';
+
+const appTheme = {
+  ...MD3DarkTheme,
+  colors: {
+    ...MD3DarkTheme.colors,
+    primary: '#7DD3FC',
+    onPrimary: '#082F49',
+    background: '#0F1115',
+    surface: '#1A1E27',
+    surfaceVariant: '#202833',
+    secondaryContainer: '#2B3747',
+    onSecondaryContainer: '#E2E8F0',
+    tertiary: '#6EE7B7',
+    onSurface: '#F8FAFC',
+    onSurfaceVariant: '#B7C2CF',
+    outline: '#384456',
+    // ⚠️ elevation must define ALL levels (0→5): Paper's Surface interpolates
+    // `colors.elevation.level${n}` for n in [0..5] when an Animated.Value
+    // elevation is passed (e.g. every Paper `Button` does this). Missing
+    // entries become `undefined` in the interpolate() outputRange and crash
+    // with: "outputRange must contain color or value with numeric component".
+    elevation: {
+      ...MD3DarkTheme.colors.elevation,
+      level0: '#0F1115',
+      level1: '#171D26',
+      level2: '#1B2430',
+      level3: '#202B38',
+      level4: '#253242',
+      level5: '#2A3A4C',
+    },
+  },
+};
 
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'home' | 'add'>('home');
-  const [selectedMonitorId, setSelectedMonitorId] = useState<number | null>(null);
+  const [detailStack, setDetailStack] = useState<{ monitorId: number; tab: DetailTabKey }[]>([]);
+  const [isLoggedIn, setIsLoggedIn] = useState(Platform.OS !== 'web');
+  const [isValidatingWeb, setIsValidatingWeb] = useState(Platform.OS === 'web');
+
+  // Web: valider le mot de passe stocké au démarrage
+  useEffect(() => {
+    if (Platform.OS !== 'web') return;
+
+    const validateStoredPassword = async () => {
+      const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('app_password') : null;
+      if (!stored) {
+        setIsValidatingWeb(false);
+        return;
+      }
+
+      try {
+        const res = await fetch('/api/relay/monitors', {
+          method: 'GET',
+          headers: { 'x-app-password': stored },
+        });
+
+        if (res.ok) {
+          setIsLoggedIn(true);
+        } else if (res.status === 401) {
+          localStorage.removeItem('app_password');
+        }
+      } catch {
+        // Erreur de connexion, mais ne pas bloquer
+      }
+      setIsValidatingWeb(false);
+    };
+
+    validateStoredPassword();
+  }, []);
+
+  const openMonitorDetail = useCallback((monitorId: number, tab: DetailTabKey = 'monitor') => {
+    setDetailStack((prev) => [...prev, { monitorId, tab }]);
+  }, []);
+
+  const closeMonitorDetail = useCallback(() => {
+    setDetailStack((prev) => prev.slice(0, -1));
+  }, []);
+
+  const currentDetail = detailStack.length > 0 ? detailStack[detailStack.length - 1] : null;
+
+  if (isValidatingWeb) {
+    return null; // Splash screen vide pendant validation
+  }
+
+  if (Platform.OS === 'web' && !isLoggedIn) {
+    return (
+      <GestureHandlerRootView style={{ flex: 1 }}>
+        <SafeAreaProvider>
+          <PaperProvider theme={appTheme} settings={{ icon: (props) => <MaterialCommunityIcons {...props} /> }}>
+            <LoginScreen onLogin={() => setIsLoggedIn(true)} />
+          </PaperProvider>
+        </SafeAreaProvider>
+      </GestureHandlerRootView>
+    );
+  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <SafeAreaProvider>
         <ToastivaProvider position="top-center">
-          <PaperProvider settings={{ icon: (props) => <MaterialCommunityIcons {...props} /> }}>
-            {selectedMonitorId !== null ? (
+          <PaperProvider theme={appTheme} settings={{ icon: (props) => <MaterialCommunityIcons {...props} /> }}>
+            {currentDetail ? (
               <MonitorDetailScreen
-                monitorId={selectedMonitorId}
-                onBack={() => setSelectedMonitorId(null)}
+                key={`${currentDetail.monitorId}-${detailStack.length}`}
+                monitorId={currentDetail.monitorId}
+                initialTab={currentDetail.tab}
+                onBack={closeMonitorDetail}
               />
             ) : currentScreen === 'home' ? (
               <HomeScreen
                 onNavigateToAdd={() => setCurrentScreen('add')}
-                onSelectMonitor={(id) => setSelectedMonitorId(id)}
+                onSelectMonitor={openMonitorDetail}
               />
             ) : (
               <AddMonitorScreen onBack={() => setCurrentScreen('home')} />
