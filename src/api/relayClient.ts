@@ -125,12 +125,6 @@ export interface MonitorDetail {
 }
 
 // --- Fonctions HTTP génériques ---
-function getWebPassword(): string | null {
-  if (!IS_WEB) return null;
-  if (typeof localStorage === 'undefined') return null;
-  return localStorage.getItem('app_password');
-}
-
 function getPlatformUrl(path: string): string {
   if (IS_WEB) {
     return `/api/relay${path}`; // Use Vercel proxy on web
@@ -141,15 +135,8 @@ function getPlatformUrl(path: string): string {
 function getPlatformHeaders(): HeadersInit {
   const headers: HeadersInit = { 'Content-Type': 'application/json' };
   
-  if (IS_WEB) {
-    const password = getWebPassword();
-    if (password) {
-      (headers as any)['x-app-password'] = password;
-    }
-  } else {
-    if (RELAY_SECRET) {
-      (headers as any)['x-relay-secret'] = RELAY_SECRET;
-    }
+  if (!IS_WEB && RELAY_SECRET) {
+    (headers as any)['x-relay-secret'] = RELAY_SECRET;
   }
   
   return headers;
@@ -158,9 +145,6 @@ function getPlatformHeaders(): HeadersInit {
 async function relayFetch<T>(path: string, body: Record<string, unknown>): Promise<T> {
   if (!IS_WEB && !RELAY_SECRET) {
     throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
-  }
-  if (IS_WEB && !getWebPassword()) {
-    throw new RelayError("Mot de passe requis sur web.");
   }
 
   let response: Response;
@@ -172,14 +156,6 @@ async function relayFetch<T>(path: string, body: Record<string, unknown>): Promi
     });
   } catch {
     throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
-  }
-
-  // Handle 401 on web: clear password and redirect to login
-  if (IS_WEB && response.status === 401) {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('app_password');
-    }
-    throw new RelayError('Session expirée. Veuillez vous reconnecter.', 401);
   }
 
   let data: any = null;
@@ -198,9 +174,6 @@ async function relayFetchGet<T>(path: string): Promise<T> {
   if (!IS_WEB && !RELAY_SECRET) {
     throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
   }
-  if (IS_WEB && !getWebPassword()) {
-    throw new RelayError("Mot de passe requis sur web.");
-  }
 
   let response: Response;
   try {
@@ -210,14 +183,6 @@ async function relayFetchGet<T>(path: string): Promise<T> {
     });
   } catch {
     throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
-  }
-
-  // Handle 401 on web: clear password and redirect to login
-  if (IS_WEB && response.status === 401) {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('app_password');
-    }
-    throw new RelayError('Session expirée. Veuillez vous reconnecter.', 401);
   }
 
   let data: any = null;
@@ -236,9 +201,6 @@ async function relayFetchDelete<T>(path: string): Promise<T> {
   if (!IS_WEB && !RELAY_SECRET) {
     throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
   }
-  if (IS_WEB && !getWebPassword()) {
-    throw new RelayError("Mot de passe requis sur web.");
-  }
 
   let response: Response;
   try {
@@ -248,13 +210,6 @@ async function relayFetchDelete<T>(path: string): Promise<T> {
     });
   } catch {
     throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
-  }
-
-  if (IS_WEB && response.status === 401) {
-    if (typeof localStorage !== 'undefined') {
-      localStorage.removeItem('app_password');
-    }
-    throw new RelayError('Session expirée. Veuillez vous reconnecter.', 401);
   }
 
   let data: any = null;

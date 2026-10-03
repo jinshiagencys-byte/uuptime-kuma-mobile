@@ -1,5 +1,4 @@
-import React, { useCallback, useState, useEffect } from 'react';
-import { Platform } from 'react-native';
+import React, { useCallback, useState } from 'react';
 import { SafeAreaProvider } from 'react-native-safe-area-context';
 import { MD3DarkTheme, PaperProvider } from 'react-native-paper';
 import { MaterialCommunityIcons } from '@expo/vector-icons';
@@ -8,7 +7,6 @@ import { ToastivaProvider } from 'toastiva';
 import HomeScreen from './src/screens/HomeScreen';
 import AddMonitorScreen from './src/screens/AddMonitorScreen';
 import MonitorDetailScreen, { type DetailTabKey } from './src/screens/MonitorDetailScreen';
-import LoginScreen from './src/screens/LoginScreen';
 
 const appTheme = {
   ...MD3DarkTheme,
@@ -45,39 +43,6 @@ const appTheme = {
 export default function App() {
   const [currentScreen, setCurrentScreen] = useState<'home' | 'add'>('home');
   const [detailStack, setDetailStack] = useState<{ monitorId: number; tab: DetailTabKey }[]>([]);
-  const [isLoggedIn, setIsLoggedIn] = useState(Platform.OS !== 'web');
-  const [isValidatingWeb, setIsValidatingWeb] = useState(Platform.OS === 'web');
-
-  // Web: valider le mot de passe stocké au démarrage
-  useEffect(() => {
-    if (Platform.OS !== 'web') return;
-
-    const validateStoredPassword = async () => {
-      const stored = typeof localStorage !== 'undefined' ? localStorage.getItem('app_password') : null;
-      if (!stored) {
-        setIsValidatingWeb(false);
-        return;
-      }
-
-      try {
-        const res = await fetch('/api/relay/monitors', {
-          method: 'GET',
-          headers: { 'x-app-password': stored },
-        });
-
-        if (res.ok) {
-          setIsLoggedIn(true);
-        } else if (res.status === 401) {
-          localStorage.removeItem('app_password');
-        }
-      } catch {
-        // Erreur de connexion, mais ne pas bloquer
-      }
-      setIsValidatingWeb(false);
-    };
-
-    validateStoredPassword();
-  }, []);
 
   const openMonitorDetail = useCallback((monitorId: number, tab: DetailTabKey = 'monitor') => {
     setDetailStack((prev) => [...prev, { monitorId, tab }]);
@@ -88,22 +53,6 @@ export default function App() {
   }, []);
 
   const currentDetail = detailStack.length > 0 ? detailStack[detailStack.length - 1] : null;
-
-  if (isValidatingWeb) {
-    return null; // Splash screen vide pendant validation
-  }
-
-  if (Platform.OS === 'web' && !isLoggedIn) {
-    return (
-      <GestureHandlerRootView style={{ flex: 1 }}>
-        <SafeAreaProvider>
-          <PaperProvider theme={appTheme} settings={{ icon: (props) => <MaterialCommunityIcons {...props} /> }}>
-            <LoginScreen onLogin={() => setIsLoggedIn(true)} />
-          </PaperProvider>
-        </SafeAreaProvider>
-      </GestureHandlerRootView>
-    );
-  }
 
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
