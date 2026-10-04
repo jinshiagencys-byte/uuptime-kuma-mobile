@@ -1,9 +1,8 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Whitelist des routes autorisées, par méthode.
-// GET  : lecture des monitors
-// POST : actions (discovery, création, pause/resume, acknowledge)
-// DELETE: suppression monitors/pages
+// Le rewrite de vercel.json place le chemin demandé dans ?path=...
+// (voir la regle "/api/relay/:path*" -> "/api/relay?path=:path*").
 const ROUTES: Record<string, RegExp[]> = {
   GET: [/^\/monitors$/, /^\/monitors\/[\w-]+$/],
   POST: [
@@ -26,9 +25,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed', method });
   }
 
-  // Chemin dérivé de req.url : indépendant de l'emplacement du fichier sur Vercel
-  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
-  const path = pathname.replace(/^\/api\/relay/, '').replace(/\/$/, '') || '/';
+  // Le rewrite place le chemin demandé dans ?path=...
+  const raw = Array.isArray(req.query.path) ? req.query.path.join('/') : req.query.path ?? '';
+  const path = '/' + String(raw).replace(/^\/+|\/+$/g, '');
 
   if (!allowed.some((r) => r.test(path))) {
     return res.status(403).json({ error: 'Path not allowed', path });
@@ -42,7 +41,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
   }
 
   try {
-    const upstreamRes = await fetch(`${relayUrl}${path}`, {
+    const upstream = await fetch(`${relayUrl}${path}`, {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -51,9 +50,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       body: method === 'POST' ? JSON.stringify(req.body ?? {}) : undefined,
     });
 
-    const data = await upstreamRes.json();
-    return res.status(upstreamRes.status).json(data);
-  } catch (err) {
+    const data = await upstream.json();
+    return res.status(upstream.status).json(data);
+  } catch {
     return res.status(502).json({ error: 'Gateway error' });
   }
 }
