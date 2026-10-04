@@ -1,31 +1,39 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
-// Whitelist chemins publics (lecture seule - GET uniquement)
-const ALLOWED_PATHS = [/^\/monitors$/, /^\/monitors\/[A-Za-z0-9_-]+$/];
-
-const ALLOWED_METHODS = ['GET'];
+// Whitelist des routes autorisées, par méthode.
+// GET  : lecture des monitors
+// POST : actions (discovery, création, pause/resume, acknowledge)
+// DELETE: suppression monitors/pages
+const ROUTES: Record<string, RegExp[]> = {
+  GET: [/^\/monitors$/, /^\/monitors\/[\w-]+$/],
+  POST: [
+    /^\/discover-pages$/,
+    /^\/discover-apis$/,
+    /^\/create-monitor-group$/,
+    /^\/create-monitor$/,
+    /^\/monitors\/[\w-]+\/(pause|resume)$/,
+    /^\/pages\/[\w-]+\/(pause|resume)$/,
+    /^\/sites\/[\w-]+\/acknowledge$/,
+  ],
+  DELETE: [/^\/monitors\/[\w-]+$/, /^\/pages\/[\w-]+$/],
+};
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
-  // 1. Vérifier méthode
   const method = req.method || 'GET';
-  if (!ALLOWED_METHODS.includes(method)) {
-    return res.status(405).json({ error: 'Method not allowed' });
+  const allowed = ROUTES[method];
+
+  if (!allowed) {
+    return res.status(405).json({ error: 'Method not allowed', method });
   }
 
-  // 2. Normaliser chemin (req.query.path peut être string ou string[])
-  let pathArray = Array.isArray(req.query.path)
-    ? req.query.path
-    : req.query.path
-    ? [req.query.path]
-    : [];
-  let path = '/' + pathArray.join('/');
+  // Chemin dérivé de req.url : indépendant de l'emplacement du fichier sur Vercel
+  const pathname = new URL(req.url || '/', 'http://localhost').pathname;
+  const path = pathname.replace(/^\/api\/relay/, '').replace(/\/$/, '') || '/';
 
-  // 3. Vérifier chemin
-  if (!ALLOWED_PATHS.some((regex) => regex.test(path))) {
-    return res.status(403).json({ error: 'Path not allowed' });
+  if (!allowed.some((r) => r.test(path))) {
+    return res.status(403).json({ error: 'Path not allowed', path });
   }
 
-  // 4. Relayer au relay backend
   const relayUrl = process.env.RELAY_URL;
   const relaySecret = process.env.RELAY_SECRET;
 
@@ -40,6 +48,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
         'Content-Type': 'application/json',
         'x-relay-secret': relaySecret,
       },
+      body: method === 'POST' ? JSON.stringify(req.body ?? {}) : undefined,
     });
 
     const data = await upstreamRes.json();

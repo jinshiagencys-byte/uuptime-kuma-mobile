@@ -5,15 +5,22 @@
 Cette application Expo est déployable sur **Vercel** avec une architecture sécurisée :
 
 - **Frontend web** : build statique Expo exporté en HTML/CSS/JS (sans secret relay)
-- **API proxy** : fonctions Vercel à `/api/relay/*` qui valident le mot de passe et transmettent au relay backend
-- **Authentification web** : mot de passe stocké en localStorage, validé côté serveur en SHA256 timing-safe
+- **API proxy** : fonction Vercel à `/api/relay/*` qui relaie les appels autorisés vers le relay backend
+- **Pas de mot de passe** : l'app s'ouvre directement sur l'accueil, aucune authentification web
+
+> **Pourquoi pas de mot de passe ?** Un écran de login devant le PWA est un frein
+> (faut le ressaisir, gestion du cache, nettoyage du localStorage à chaque
+> changement). Le secret `RELAY_SECRET` reste de toute façon côté serveur.
+> Si un jour tu veux restreindre l'accès **sans** toucher à l'app, voir
+> [Sécuriser le site sans mot de passe](#sécuriser-le-site-sans-mot-de-passe).
 
 ## Prérequis
 
 1. **GitHub** : le repo est déjà à `https://github.com/jinshiagencys-byte/uuptime-kuma-mobile`
 2. **Compte Vercel** : créé/connecté à GitHub (offert)
 3. **Relay backend** : URL + secret du serveur relay (ex: `https://railway-production-d365.up.railway.app`)
-4. **Mot de passe web** : un secret que tu veux utiliser pour accéder au PWA
+
+Aucune autre variable n'est nécessaire : **pas de `APP_PASSWORD`**.
 
 ## Étapes de déploiement
 
@@ -41,14 +48,14 @@ Clique sur **Environment Variables** et ajoute :
 
 | Clé | Valeur | Note |
 |-----|--------|------|
-| **APP_PASSWORD** | Ton mot de passe web (ex: `monMotDePasse123`) | Le mot de passe que les utilisateurs web entrent. Can be any complex string. |
 | **RELAY_URL** | URL du serveur relay (ex: `https://railway-production-d365.up.railway.app`) | URL complète du serveur relay backend |
 | **RELAY_SECRET** | Secret du serveur relay | Le secret pour la communication Vercel → relay backend |
 
 **Important** :
-- `APP_PASSWORD` sera utilisé par le proxy Vercel pour valider les requêtes web
+- Seules ces **2 variables** sont nécessaires. `APP_PASSWORD` n'existe plus.
 - `RELAY_URL` et `RELAY_SECRET` restent **secrets côté serveur** et ne sont jamais exposés au client web
 - Ne mets **JAMAIS** de secret en `EXPO_PUBLIC_*` sinon ils apparaîtraient dans le bundle web
+- Le proxy ne demande aucun mot de passe : le site est accessible à quiconque a l'URL (voir [Sécuriser le site sans mot de passe](#sécuriser-le-site-sans-mot-de-passe))
 
 ### 4. Déployer
 
@@ -72,29 +79,24 @@ Une fois déployé, Vercel te donne des URLs :
 ## Utilisation du PWA web
 
 1. Ouvre le site : `https://[votre-projet].vercel.app`
-2. Tu vois l'écran de login
-3. Entre le mot de passe que tu as défini dans `APP_PASSWORD`
-4. Le PWA se sauvegarde dans le cache du navigateur
-5. Sur iPhone : tu peux l'ajouter à l'écran d'accueil (Share → "Add to Home Screen")
+2. L'app s'ouvre directement sur l'accueil : **aucun mot de passe demandé**
+3. Le PWA se sauvegarde dans le cache du navigateur
+4. Sur iPhone : tu peux l'ajouter à l'écran d'accueil (Share → "Add to Home Screen")
 
 ## Architecture de sécurité
 
 ```
 ┌─ Web Browser ────────────────────────────────────┐
-│  App en SPA                                       │
-│  - localStorage('app_password') stocké            │
+│  App en SPA (Expo export)                        │
+│  - Aucune authentification, aucun mot de passe   │
 │  - Requête GET /api/relay/monitors               │
-│    avec header x-app-password                    │
 └──────────────┬──────────────────────────────────┘
                │
                ↓
-┌─ Vercel Edge Function /api/relay ────────────────┐
-│  - Lit x-app-password du header                  │
-│  - Hash SHA256 + timing-safe compare             │
-│  - Compare avec APP_PASSWORD côté serveur        │
-│  - Si OK: transfère au relay backend avec secret │
-│  - Si pas OK: retourne 401 Unauthorized          │
-│  - localStorage supprimé sur 401                 │
+┌─ Vercel Function /api/relay/[...path] ───────────┐
+│  - Whitelist stricte des méthodes et des chemins │
+│  - Route l'appel avec le header x-relay-secret   │
+│  - Ajoute le secret côté serveur                │
 └──────────────┬──────────────────────────────────┘
                │
                ↓
@@ -104,6 +106,22 @@ Une fois déployé, Vercel te donne des URLs :
 └────────────────────────────────────────────────────┘
 ```
 
+### Sécuriser le site sans mot de passe
+
+Le secret du relay n'est **jamais** exposé (il reste dans les variables
+serveur), mais l'URL du site est publique. Si tu veux limiter qui peut y
+accéder **sans** ajouter d'écran de login dans l'app, utilise les réglages
+Vercel — ça ne modifie pas le code :
+
+| Besoin | Réglage Vercel |
+|--------|----------------|
+| moi seul / mon équipe | **Settings → Deployment Protection**, ou **Settings → Access → Vercel Authentication** (SSO Vercel) |
+| accès depuis mon domicile seulement | **Settings → Firewall** : autoriser uniquement tes IP sur `/api/relay/*` |
+| partage avec un lien | laisser public (état actuel) |
+
+Ces protections sont **au niveau du edge** : elles s'appliquent à tout le site
+y compris `/api/relay/*`, et ne demandent rien à l'utilisateur.
+
 ### Points clés de sécurité
 
 1. **Pas de secret relay dans le web bundle**
@@ -111,13 +129,19 @@ Une fois déployé, Vercel te donne des URLs :
    - Elles ne peuvent pas être lues par le navigateur
    - Elles existent **uniquement** dans l'environnement Vercel
 
-2. **Validation timing-safe du mot de passe**
-   - Le proxy compare `SHA256(password_utilisateur)` avec `SHA256(APP_PASSWORD)`
-   - Utilise `crypto.timingSafeEqual()` pour éviter les timing attacks
-
-3. **Isolation du relay secret**
+2. **Isolation du relay secret**
    - Seule la fonction Vercel peut utiliser `RELAY_SECRET`
    - Le client web ne le voit jamais
+
+3. **Whitelist des routes**
+   - `api/relay/[...path].ts` n'accepte que des méthodes et chemins listés explicitement
+   - Tout le reste est rejeté en `403` / `405` avant d'atteindre le relay
+   - Le proxy ne sert que de relais : il ne refait aucun calcul métier
+
+4. **Le site est public** (comportement voulu ici)
+   - Pas de mot de passe ni d'écran de login dans l'app
+   - `RELAY_URL` reste masqué, donc le relay n'est pas accessible directement depuis le navigateur
+   - Si tu veux verrouiller l'accès, passe par Vercel (voir section ci-dessus), ça ne modifie pas le code de l'app
 
 ## Dépannage
 
@@ -130,14 +154,33 @@ Une fois déployé, Vercel te donne des URLs :
 2. Vérifie que `RELAY_URL` et `RELAY_SECRET` existent
 3. Redéploie (Project → Deployments → dernière version → Redeploy)
 
-### Login échoue sans raison (401)
+### Le site affiche une erreur 403 "Path not allowed"
 
-**Cause** : le mot de passe entré ne correspond pas à `APP_PASSWORD`.
+**Cause** : l'URL appelée par l'app web n'est pas dans la whitelist du proxy
+(`api/relay/[...path].ts`), ou utilise une méthode non autorisée.
 
 **Solution** :
-1. Vérifie que tu as bien saisi `APP_PASSWORD` dans les env vars Vercel
-2. Redéploie pour que les variables soient chargées
-3. Réessaye sur le site
+1. Regarde le champ `path` renvoyé dans la réponse 403 : il montre le chemin
+   exact que le proxy a reçu
+2. Ajoute la route au format attendu dans `ROUTES` (voir `api/relay/[...path].ts`)
+3. Redéploie
+
+### Le site affiche 405 "Method not allowed"
+
+**Cause** : la whitelist ne contient que `GET` (lecture seule). Les actions de
+l'app (pause, resume, suppression, création, découverte) utilisent `POST` et
+`DELETE`.
+
+**Solution** : autorise ces méthodes/routes dans `ROUTES`, puis vérifie aussi
+que le proxy transmet bien le `body` pour les `POST`.
+
+### Les actions marchent sur mobile mais pas sur le web
+
+**Cause** : sur mobile, l'app appelle `RELAY_URL` directement. Sur web, elle
+passe par `/api/relay/*`, qui filtre méthodes et chemins.
+
+**Solution** : compare la liste des routes utilisées par l'app
+(`src/api/relayClient.ts`) avec la whitelist du proxy, et aligne les deux.
 
 ### Les requêtes vont au relay direct au lieu du proxy
 
@@ -151,7 +194,7 @@ Une fois déployé, Vercel te donne des URLs :
 
 - `vercel.json` : config de déploiement Vercel
 - `.vercelignore` : exclut `.env` lors du déploiement
-- `api/relay/[...path].ts` : la fonction serverless qui valide et proxy les appels
+- `api/relay/[...path].ts` : la fonction serverless qui filtre (méthodes + chemins) et relaie les appels
 - `dist/` : généré à la compilation, contient le site web static
 - `.env` : **JAMAIS** committé, tu le gardes local ou dans GitHub Secrets pour le CI
 

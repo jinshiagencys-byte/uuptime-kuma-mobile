@@ -6,7 +6,6 @@ import {
   TouchableOpacity,
   RefreshControl,
   Image,
-  Platform,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import { Appbar, Chip, Searchbar, Surface, Text } from 'react-native-paper';
@@ -249,10 +248,6 @@ export default function HomeScreen({
   }, [rows, childrenByParent]);
 
   const handleTogglePause = async (monitor: MonitorItem) => {
-    if (Platform.OS === 'web') {
-      setLoadError('Pause/reprise non disponible sur la version web (lecture seule).');
-      return;
-    }
     try {
       if (monitor.active) {
         await pauseMonitor(monitor.id);
@@ -310,7 +305,6 @@ export default function HomeScreen({
               hitSlop={{ top: 8, bottom: 8, left: 8, right: 8 }}
               accessibilityRole="button"
               accessibilityLabel={isPaused ? `Reprendre ${row.name}` : `Mettre en pause ${row.name}`}
-              disabled={Platform.OS === 'web'}
             >
               {isTrendUp ? (
                 <ArrowUp size={14} color={tone} strokeWidth={3} />
@@ -337,9 +331,7 @@ export default function HomeScreen({
           <Appbar.Action icon={() => <Menu size={22} color={theme.colors.onBackground} />} onPress={() => {}} />
           <Appbar.Content title="" />
           <Appbar.Action icon={() => <Bell size={20} color={theme.colors.onBackground} />} onPress={() => {}} />
-          {Platform.OS !== 'web' && (
-            <Appbar.Action icon={() => <Plus size={22} color={theme.colors.onBackground} />} onPress={onNavigateToAdd} />
-          )}
+          <Appbar.Action icon={() => <Plus size={22} color={theme.colors.onBackground} />} onPress={onNavigateToAdd} />
         </Appbar.Header>
       </View>
 
