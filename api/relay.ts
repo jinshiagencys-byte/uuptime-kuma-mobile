@@ -54,8 +54,9 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(500).json({ error: 'Server misconfigured' });
   }
 
+  let upstream: Response;
   try {
-    const upstream = await fetch(`${relayUrl}${path}`, {
+    upstream = await fetch(`${relayUrl}${path}`, {
       method,
       headers: {
         'Content-Type': 'application/json',
@@ -63,10 +64,30 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
       },
       body: method === 'POST' ? JSON.stringify(req.body ?? {}) : undefined,
     });
-
-    const data = await upstream.json();
-    return res.status(upstream.status).json(data);
-  } catch {
+  } catch (error) {
+    const cause = error instanceof Error ? error.cause : undefined;
+    const causeCode =
+      cause && typeof cause === 'object' && 'code' in cause && typeof cause.code === 'string'
+        ? cause.code
+        : undefined;
+    console.error('[api/relay] Unable to reach upstream relay', {
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+      causeCode,
+    });
     return res.status(502).json({ error: 'Gateway error' });
   }
+
+  let data: unknown;
+  try {
+    data = await upstream.json();
+  } catch (error) {
+    console.error('[api/relay] Upstream relay returned an unreadable response', {
+      status: upstream.status,
+      contentType: upstream.headers.get('content-type'),
+      errorName: error instanceof Error ? error.name : 'UnknownError',
+    });
+    return res.status(502).json({ error: 'Gateway error' });
+  }
+
+  return res.status(upstream.status).json(data);
 }
