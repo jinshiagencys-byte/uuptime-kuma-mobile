@@ -22,6 +22,28 @@ Cette application Expo est déployable sur **Vercel** avec une architecture séc
 
 Aucune autre variable n'est nécessaire : **pas de `APP_PASSWORD`**.
 
+## Tester en local
+
+Le client web appelle le proxy local sur le port `3000`; Expo sert l'application
+sur le port `8081`. Dans le fichier `.env.local` à la racine (ignoré par Git),
+définis `RELAY_URL`, `RELAY_SECRET` et
+`EXPO_PUBLIC_RELAY_PROXY_URL=http://localhost:3000`.
+
+Lance les deux processus dans des terminaux séparés :
+
+```bash
+npm run dev:proxy
+```
+
+```bash
+npm run web
+```
+
+La commande `dev:proxy` transmet `RELAY_URL` et `RELAY_SECRET` au processus
+Vercel local sans les inclure dans le bundle web. Si Expo tournait déjà lorsque
+`.env.local` a été modifié, arrête-le puis relance `npm run web` pour recharger
+la variable publique du proxy.
+
 ## Étapes de déploiement
 
 ### 1. Connecter le repo à Vercel

@@ -2,8 +2,7 @@
   "buildCommand": "npx expo export --platform web",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/api/relay/:path*", "destination": "/api/relay?path=:path*" },
-    { "source": "/((?!api/).*)", "destination": "/index.html" }
+    { "source": "/((?!api/|_expo/).*)", "destination": "/index.html" }
   ],
   "functions": {
     "api/relay.ts": { "maxDuration": 60 }

@@ -1,8 +1,7 @@
 import type { VercelRequest, VercelResponse } from '@vercel/node';
 
 // Whitelist des routes autorisées, par méthode.
-// Le rewrite de vercel.json place le chemin demandé dans ?path=...
-// (voir la regle "/api/relay/:path*" -> "/api/relay?path=:path*").
+// Le client transmet le chemin du relay dans le paramètre `path`.
 const ROUTES: Record<string, RegExp[]> = {
   GET: [/^\/monitors$/, /^\/monitors\/[\w-]+$/],
   POST: [
@@ -18,6 +17,21 @@ const ROUTES: Record<string, RegExp[]> = {
 };
 
 export default async function handler(req: VercelRequest, res: VercelResponse) {
+  const origin = req.headers.origin;
+  const isLocalOrigin =
+    typeof origin === 'string' && /^http:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/.test(origin);
+
+  if (isLocalOrigin) {
+    res.setHeader('Access-Control-Allow-Origin', origin);
+    res.setHeader('Access-Control-Allow-Methods', 'GET, POST, DELETE, OPTIONS');
+    res.setHeader('Access-Control-Allow-Headers', 'Content-Type');
+    res.setHeader('Vary', 'Origin');
+  }
+
+  if (req.method === 'OPTIONS' && isLocalOrigin) {
+    return res.status(204).end();
+  }
+
   const method = req.method || 'GET';
   const allowed = ROUTES[method];
 
@@ -25,7 +39,7 @@ export default async function handler(req: VercelRequest, res: VercelResponse) {
     return res.status(405).json({ error: 'Method not allowed', method });
   }
 
-  // Le rewrite place le chemin demandé dans ?path=...
+  // Accepte le chemin de la requête sous forme de paramètre ou de segments.
   const raw = Array.isArray(req.query.path) ? req.query.path.join('/') : req.query.path ?? '';
   const path = '/' + String(raw).replace(/^\/+|\/+$/g, '');
 

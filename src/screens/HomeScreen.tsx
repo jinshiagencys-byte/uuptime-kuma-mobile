@@ -281,7 +281,7 @@ export default function HomeScreen({
       <Surface key={row.id} style={styles.rowCard} elevation={0}>
         <TouchableOpacity
           style={styles.row}
-          onPress={() => onSelectMonitor(row.id, 'monitor')}
+          onPress={() => onSelectMonitor(row.id, isGroup ? 'qa' : 'monitor')}
           activeOpacity={0.85}
           accessibilityRole="button"
           accessibilityLabel={`${row.name}, disponibilité ${formatAvailabilityPercent(percent)}`}

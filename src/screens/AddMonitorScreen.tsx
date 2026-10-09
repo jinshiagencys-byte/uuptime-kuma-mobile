@@ -22,18 +22,18 @@ import {
 
 const theme = {
   colors: {
-    background: '#0F1216',
-    surface: '#161B22',
-    surfaceVariant: '#1E2530',
-    primary: '#4ADE80',
-    onPrimary: '#00391A',
-    onBackground: '#FFFFFF',
-    onSurface: '#E2E8F0',
-    outline: '#334155',
-    textMuted: '#94A3B8',
-    error: '#F87171',
-    skeleton: '#2A3444',
-    skeletonHighlight: '#3B485A',
+    background: '#0F1115',
+    surface: '#1A1E27',
+    surfaceVariant: '#202833',
+    primary: '#7DD3FC',
+    onPrimary: '#082F49',
+    onBackground: '#F8FAFC',
+    onSurface: '#F8FAFC',
+    outline: '#384456',
+    textMuted: '#A6B0BF',
+    error: '#FCA5A5',
+    skeleton: '#202833',
+    skeletonHighlight: '#384456',
   },
 };
 

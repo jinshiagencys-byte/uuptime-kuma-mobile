@@ -17,30 +17,36 @@ import type {
 } from '../api/relayClient';
 
 const C = {
-  background: '#171115',
-  panel: '#21191E',
-  panelRaised: '#2A2026',
-  border: '#49343F',
-  text: '#F8F1F5',
-  muted: '#B8AAB2',
-  pink: '#E66BAE',
-  pinkDark: '#4A263A',
-  green: '#85D5A0',
-  greenBg: '#20392C',
-  red: '#FF9BA8',
-  redBg: '#48262E',
-  yellow: '#F4D37B',
-  yellowBg: '#463B22',
-  slate: '#C6B9C1',
+  background: '#0F1115',
+  surface: '#1A1E27',
+  surfaceLow: '#171D26',
+  surfaceHigh: '#202B38',
+  surfaceHighest: '#253242',
+  outline: '#384456',
+  text: '#F8FAFC',
+  muted: '#B7C2CF',
+  primary: '#7DD3FC',
+  onPrimary: '#082F49',
+  primaryContainer: '#2B3747',
+  onPrimaryContainer: '#E2E8F0',
+  secondary: '#6EE7B7',
+  secondaryContainer: '#173D37',
+  onSecondaryContainer: '#B7F7DD',
+  error: '#FFB4AB',
+  errorContainer: '#5C1F1A',
+  onErrorContainer: '#FFDAD5',
+  tertiary: '#F4D37B',
+  tertiaryContainer: '#463B22',
+  onTertiaryContainer: '#F9E8B1',
 };
 
 type QaStatus = QaTestCase['status'];
 
 const STATUS: Record<QaStatus, { label: string; color: string; background: string }> = {
-  passed: { label: 'Réussi', color: C.green, background: C.greenBg },
-  failed: { label: 'Échec', color: C.red, background: C.redBg },
-  blocked: { label: 'Bloqué', color: C.yellow, background: C.yellowBg },
-  skipped: { label: 'Ignoré', color: C.slate, background: C.panelRaised },
+  passed: { label: 'Réussi', color: C.secondary, background: C.secondaryContainer },
+  failed: { label: 'Échec', color: C.error, background: C.errorContainer },
+  blocked: { label: 'Bloqué', color: C.tertiary, background: C.tertiaryContainer },
+  skipped: { label: 'Ignoré', color: C.muted, background: C.surfaceHigh },
 };
 
 const CATEGORY_LABELS: Record<string, string> = {
@@ -79,7 +85,7 @@ function StatusBadge({ status, compact = false }: { status: string; compact?: bo
 
 function SeverityBadge({ severity }: { severity: QaTestCase['severity'] }) {
   if (!severity) return null;
-  const color = severity === 'P1' ? C.red : severity === 'P0' ? C.pink : C.yellow;
+  const color = severity === 'P1' ? C.error : severity === 'P0' ? C.primary : C.tertiary;
   return (
     <View style={[styles.severityBadge, { borderColor: `${color}70` }]}>
       <Text style={[styles.severityText, { color }]}>{severity}</Text>
@@ -112,7 +118,7 @@ function Evidence({ step }: { step: QaTestStep }) {
             style={styles.evidenceLink}
           >
             <Text style={styles.evidenceLinkText} numberOfLines={2}>{evidence.url}</Text>
-            <ExternalLink size={13} color={C.pink} />
+            <ExternalLink size={13} color={C.primary} />
           </TouchableOpacity>
         )}
         {!!evidence.console && <Text style={styles.evidenceText}>Console : {evidence.console}</Text>}
@@ -250,7 +256,7 @@ export default function QaReportPanel({ report }: { report?: QaReportRecord | nu
         </View>
         <View style={styles.headerActions}>
           <View style={styles.runStatus}>
-            <View style={[styles.statusDot, { backgroundColor: C.pink }]} />
+            <View style={[styles.statusDot, { backgroundColor: C.primary }]} />
             <Text style={styles.runStatusText}>{stateLabel}</Text>
           </View>
           {!!report.github_run_url && (
@@ -264,16 +270,16 @@ export default function QaReportPanel({ report }: { report?: QaReportRecord | nu
               style={styles.runLink}
             >
               <Text style={styles.runLinkText}>Voir le run</Text>
-              <ExternalLink size={14} color={C.pink} />
+              <ExternalLink size={14} color={C.primary} />
             </TouchableOpacity>
           )}
         </View>
       </View>
 
       <View style={styles.summaryRow}>
-        <SummaryCard label="Réussis" count={counts.passed} color={C.green} />
-        <SummaryCard label="Échoués" count={counts.failed} color={C.red} />
-        <SummaryCard label="Bloqués" count={counts.blocked} color={C.yellow} />
+        <SummaryCard label="Réussis" count={counts.passed} color={C.secondary} />
+        <SummaryCard label="Échoués" count={counts.failed} color={C.error} />
+        <SummaryCard label="Bloqués" count={counts.blocked} color={C.tertiary} />
       </View>
 
       <View style={[styles.workspace, desktop && styles.workspaceDesktop]}>
@@ -460,9 +466,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: 2,
   },
   reportHeading: { flex: 1, minWidth: 0, gap: 3 },
-  eyebrow: { color: C.pink, fontSize: 10, fontWeight: '800', letterSpacing: 1.8 },
-  title: { color: C.text, fontSize: 22, fontWeight: '800' },
-  subtitle: { color: C.muted, fontSize: 12 },
+  eyebrow: { color: C.primary, fontSize: 11, fontWeight: '700', letterSpacing: 1.2 },
+  title: { color: C.text, fontSize: 24, fontWeight: '700' },
+  subtitle: { color: C.muted, fontSize: 14 },
   headerActions: { alignItems: 'flex-end', gap: 8 },
   runStatus: {
     flexDirection: 'row',
@@ -471,38 +477,38 @@ const styles = StyleSheet.create({
     paddingHorizontal: 10,
     paddingVertical: 6,
     borderRadius: 16,
-    backgroundColor: C.panelRaised,
+    backgroundColor: C.surfaceHigh,
   },
   runStatusText: { color: C.text, fontSize: 11, fontWeight: '700', textTransform: 'capitalize' },
   runLink: { flexDirection: 'row', alignItems: 'center', gap: 5, paddingVertical: 3 },
-  runLinkText: { color: C.pink, fontSize: 12, fontWeight: '700' },
+  runLinkText: { color: C.primary, fontSize: 14, fontWeight: '600' },
   statusDot: { width: 7, height: 7, borderRadius: 4 },
   summaryRow: { flexDirection: 'row', gap: 10 },
   summaryCard: {
     flex: 1,
     minWidth: 0,
-    minHeight: 66,
+    minHeight: 72,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 11,
-    padding: 12,
-    borderRadius: 10,
-    backgroundColor: C.panel,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: C.surfaceLow,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.outline,
   },
   summaryAccent: { width: 3, height: 34, borderRadius: 2 },
-  summaryCount: { color: C.text, fontSize: 18, fontWeight: '800' },
-  summaryLabel: { color: C.muted, fontSize: 10, fontWeight: '600' },
+  summaryCount: { color: C.text, fontSize: 22, fontWeight: '700' },
+  summaryLabel: { color: C.muted, fontSize: 12, fontWeight: '500' },
   workspace: { gap: 12 },
   workspaceDesktop: { flexDirection: 'row', alignItems: 'stretch' },
   caseNavigation: {
     minWidth: 0,
-    padding: 12,
-    borderRadius: 12,
-    backgroundColor: C.panel,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: C.surfaceLow,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.outline,
   },
   caseNavigationDesktop: { width: 252 },
   navigationHeader: {
@@ -512,7 +518,7 @@ const styles = StyleSheet.create({
     paddingHorizontal: 3,
     paddingBottom: 10,
     borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    borderBottomColor: C.outline,
   },
   navigationTitle: { color: C.text, fontSize: 13, fontWeight: '800' },
   navigationCount: {
@@ -520,19 +526,19 @@ const styles = StyleSheet.create({
     textAlign: 'center',
     overflow: 'hidden',
     color: C.muted,
-    backgroundColor: C.panelRaised,
+    backgroundColor: C.surfaceHigh,
     borderRadius: 10,
     paddingHorizontal: 6,
     paddingVertical: 2,
-    fontSize: 10,
-    fontWeight: '700',
+    fontSize: 12,
+    fontWeight: '600',
   },
   caseList: { paddingTop: 8, gap: 8 },
   caseListHorizontal: { paddingRight: 4 },
   categoryGroup: { gap: 4 },
   categoryTitle: {
     color: C.muted,
-    fontSize: 9,
+    fontSize: 11,
     fontWeight: '800',
     letterSpacing: 1.1,
     textTransform: 'uppercase',
@@ -550,21 +556,21 @@ const styles = StyleSheet.create({
     borderColor: 'transparent',
     borderRadius: 8,
   },
-  caseNavigationItemDesktop: { minHeight: 47, paddingHorizontal: 8, paddingVertical: 7 },
-  caseNavigationItemMobile: { width: 206, minHeight: 48, paddingHorizontal: 9, paddingVertical: 7, backgroundColor: C.panel },
-  caseNavigationItemActive: { backgroundColor: C.pinkDark, borderColor: `${C.pink}80` },
+  caseNavigationItemDesktop: { minHeight: 48, paddingHorizontal: 12, paddingVertical: 8 },
+  caseNavigationItemMobile: { width: 206, minHeight: 48, paddingHorizontal: 12, paddingVertical: 8, backgroundColor: C.surface },
+  caseNavigationItemActive: { backgroundColor: C.primaryContainer, borderColor: C.primary },
   caseNavigationText: { flex: 1, minWidth: 0, gap: 2 },
-  caseNavigationId: { color: C.pink, fontSize: 10, fontWeight: '800' },
-  activeCaseText: { color: '#FFB6D9' },
-  caseNavigationTitle: { color: C.text, fontSize: 10, fontWeight: '600' },
+  caseNavigationId: { color: C.primary, fontSize: 12, fontWeight: '600' },
+  activeCaseText: { color: C.onPrimaryContainer },
+  caseNavigationTitle: { color: C.text, fontSize: 12, fontWeight: '500' },
   navigationStatusDot: { width: 7, height: 7, borderRadius: 4 },
   caseDetail: {
     minWidth: 0,
-    padding: 14,
-    borderRadius: 12,
-    backgroundColor: C.panelRaised,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: C.surface,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.outline,
   },
   caseDetailDesktop: { flex: 1 },
   caseHeader: {
@@ -574,34 +580,34 @@ const styles = StyleSheet.create({
     gap: 10,
     paddingBottom: 13,
     borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    borderBottomColor: C.outline,
   },
   caseHeading: { flex: 1, minWidth: 0, gap: 4 },
-  caseId: { color: C.pink, fontSize: 10, fontWeight: '800', letterSpacing: 0.5 },
-  caseTitle: { color: C.text, fontSize: 16, fontWeight: '800' },
+  caseId: { color: C.primary, fontSize: 12, fontWeight: '600', letterSpacing: 0.3 },
+  caseTitle: { color: C.text, fontSize: 20, fontWeight: '600' },
   caseMetadata: { flexDirection: 'row', alignItems: 'center', flexWrap: 'wrap', gap: 6, marginTop: 2 },
   categoryTag: {
     color: C.muted,
-    backgroundColor: C.panel,
-    borderRadius: 10,
-    paddingHorizontal: 8,
-    paddingVertical: 4,
-    fontSize: 9,
-    fontWeight: '700',
+    backgroundColor: C.primaryContainer,
+    borderRadius: 8,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    fontSize: 12,
+    fontWeight: '500',
   },
-  severityBadge: { borderWidth: 1, borderRadius: 10, paddingHorizontal: 7, paddingVertical: 3 },
-  severityText: { fontSize: 9, fontWeight: '800' },
-  discoveredTag: { color: C.pink, fontSize: 9, fontWeight: '700' },
+  severityBadge: { borderWidth: 1, borderRadius: 8, paddingHorizontal: 8, paddingVertical: 5 },
+  severityText: { fontSize: 11, fontWeight: '600' },
+  discoveredTag: { color: C.primary, fontSize: 11, fontWeight: '600' },
   statusBadge: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
     paddingHorizontal: 9,
     paddingVertical: 6,
-    borderRadius: 14,
+    borderRadius: 16,
   },
   statusBadgeCompact: { alignSelf: 'flex-start', paddingHorizontal: 7, paddingVertical: 5 },
-  statusText: { fontSize: 10, fontWeight: '800' },
+  statusText: { fontSize: 12, fontWeight: '600' },
   stepsHeading: {
     flexDirection: 'row',
     justifyContent: 'space-between',
@@ -609,8 +615,8 @@ const styles = StyleSheet.create({
     paddingTop: 13,
     paddingBottom: 8,
   },
-  stepsTitle: { color: C.text, fontSize: 12, fontWeight: '800' },
-  stepsCount: { color: C.muted, fontSize: 10 },
+  stepsTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
+  stepsCount: { color: C.muted, fontSize: 12 },
   tableHeader: {
     flexDirection: 'row',
     alignItems: 'center',
@@ -618,20 +624,20 @@ const styles = StyleSheet.create({
     paddingHorizontal: 8,
     paddingVertical: 8,
     borderBottomWidth: 1,
-    borderBottomColor: C.border,
+    borderBottomColor: C.outline,
   },
   stepNumberHeading: { width: 24 },
-  tableHeading: { color: C.muted, fontSize: 9, fontWeight: '800', textTransform: 'uppercase' },
+  tableHeading: { color: C.muted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase' },
   stepList: { gap: 8 },
   stepRow: {
     flexDirection: 'row',
     alignItems: 'flex-start',
     gap: 9,
-    padding: 10,
-    borderRadius: 9,
-    backgroundColor: C.panel,
+    padding: 12,
+    borderRadius: 12,
+    backgroundColor: C.surfaceLow,
     borderWidth: 1,
-    borderColor: '#3A2D34',
+    borderColor: C.outline,
   },
   stepRowMobile: { flexDirection: 'column', gap: 10 },
   stepRowDesktop: { flexDirection: 'row', alignItems: 'flex-start', paddingVertical: 12 },
@@ -644,54 +650,54 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
     borderRadius: 6,
-    backgroundColor: C.panelRaised,
+    backgroundColor: C.surfaceHigh,
   },
-  stepNumberText: { color: C.muted, fontSize: 10, fontWeight: '800' },
+  stepNumberText: { color: C.muted, fontSize: 12, fontWeight: '600' },
   stepCell: { minWidth: 0 },
   actionCell: { flex: 1.05 },
   preconditionCell: { flex: 1 },
   expectedCell: { flex: 1.4 },
   resultCell: { width: 74 },
-  cellLabel: { color: C.muted, fontSize: 9, fontWeight: '800', textTransform: 'uppercase', marginBottom: 3 },
-  actionText: { color: C.text, fontSize: 11, fontWeight: '700', lineHeight: 16 },
-  bodyText: { color: C.text, fontSize: 10, lineHeight: 15 },
-  actualText: { color: C.muted, fontSize: 10, lineHeight: 15 },
-  observedDetails: { gap: 5, marginTop: 6, padding: 7, borderRadius: 6, backgroundColor: C.panelRaised },
+  cellLabel: { color: C.muted, fontSize: 11, fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
+  actionText: { color: C.text, fontSize: 13, fontWeight: '500', lineHeight: 18 },
+  bodyText: { color: C.text, fontSize: 12, lineHeight: 17 },
+  actualText: { color: C.muted, fontSize: 12, lineHeight: 17 },
+  observedDetails: { gap: 5, marginTop: 8, padding: 12, borderRadius: 8, backgroundColor: C.surfaceHigh },
   detailsToggle: { alignSelf: 'flex-start', marginTop: 6, paddingVertical: 2 },
-  detailsToggleText: { color: C.pink, fontSize: 9, fontWeight: '700' },
-  evidence: { marginTop: 8, padding: 7, borderRadius: 6, backgroundColor: C.panelRaised },
-  evidenceTitle: { color: C.pink, fontSize: 8, fontWeight: '800', textTransform: 'uppercase', marginBottom: 3 },
+  detailsToggleText: { color: C.primary, fontSize: 12, fontWeight: '600' },
+  evidence: { marginTop: 8, padding: 10, borderRadius: 8, backgroundColor: C.surfaceHigh },
+  evidenceTitle: { color: C.primary, fontSize: 10, fontWeight: '600', textTransform: 'uppercase', marginBottom: 4 },
   evidenceDetails: { gap: 3 },
-  evidenceText: { color: C.muted, fontSize: 9, lineHeight: 13 },
+  evidenceText: { color: C.muted, fontSize: 11, lineHeight: 16 },
   evidenceLink: { flexDirection: 'row', alignItems: 'center', gap: 5 },
-  evidenceLinkText: { flexShrink: 1, color: C.pink, fontSize: 9, lineHeight: 13 },
+  evidenceLinkText: { flexShrink: 1, color: C.primary, fontSize: 11, lineHeight: 16 },
   empty: {
     alignItems: 'center',
     justifyContent: 'center',
     gap: 5,
     minHeight: 140,
     padding: 20,
-    borderRadius: 12,
-    backgroundColor: C.panel,
+    borderRadius: 16,
+    backgroundColor: C.surfaceLow,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.outline,
   },
   emptyTitle: { color: C.text, fontSize: 14, fontWeight: '800', textAlign: 'center' },
   emptyText: { color: C.muted, fontSize: 11, textAlign: 'center' },
   sideEffects: {
-    padding: 13,
-    borderRadius: 11,
-    backgroundColor: C.panel,
+    padding: 16,
+    borderRadius: 16,
+    backgroundColor: C.surfaceLow,
     borderWidth: 1,
-    borderColor: C.border,
+    borderColor: C.outline,
   },
   sideEffectsHeader: { flexDirection: 'row', alignItems: 'center', justifyContent: 'space-between' },
   sideEffectsHeading: { flexDirection: 'row', alignItems: 'center', gap: 8 },
-  sideEffectsTitle: { color: C.text, fontSize: 12, fontWeight: '800' },
-  toggleText: { color: C.pink, fontSize: 10, fontWeight: '800' },
-  effectList: { gap: 8, paddingTop: 10 },
-  effectItem: { gap: 3, padding: 9, borderRadius: 7, backgroundColor: C.panelRaised },
-  effectTitle: { color: C.text, fontSize: 10, fontWeight: '800' },
-  effectText: { color: C.muted, fontSize: 9, lineHeight: 14 },
-  effectReference: { color: C.pink, fontSize: 9, lineHeight: 14 },
+  sideEffectsTitle: { color: C.text, fontSize: 14, fontWeight: '600' },
+  toggleText: { color: C.primary, fontSize: 12, fontWeight: '600' },
+  effectList: { gap: 8, paddingTop: 12 },
+  effectItem: { gap: 4, padding: 12, borderRadius: 8, backgroundColor: C.surfaceHigh },
+  effectTitle: { color: C.text, fontSize: 13, fontWeight: '600' },
+  effectText: { color: C.muted, fontSize: 12, lineHeight: 17 },
+  effectReference: { color: C.primary, fontSize: 12, lineHeight: 17 },
 });
