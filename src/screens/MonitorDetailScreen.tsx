@@ -219,6 +219,7 @@ export default function MonitorDetailScreen({
   const [activeTab, setActiveTab] = useState<DetailTabKey>(initialTab);
   const [sidebarOpen, setSidebarOpen] = useState(false);
   const isGroup = monitor?.type === 'group';
+  const selectedTab = isGroup ? 'qa' : activeTab;
 
   const isMounted = useRef(true);
   const slideAnim = useRef(new Animated.Value(SIDEBAR_WIDTH)).current;
@@ -425,11 +426,11 @@ export default function MonitorDetailScreen({
       </View>
 
       <View style={[s.detailBody, isWide && s.detailBodyWide]}>
-        {isWide ? (
+        {monitor && (isWide ? (
           <View style={[s.tabBarContainer, s.tabBarContainerWide]}>
             <Text style={s.navSectionLabel}>MONITOR</Text>
             {tabs.map((tab) => {
-              const isActive = activeTab === tab.id;
+              const isActive = selectedTab === tab.id;
               const Icon = tab.icon;
               return (
                 <TouchableOpacity
@@ -457,7 +458,7 @@ export default function MonitorDetailScreen({
               contentContainerStyle={s.tabScrollContent}
             >
               {tabs.map((tab) => {
-                const isActive = activeTab === tab.id;
+                const isActive = selectedTab === tab.id;
                 return (
                   <TouchableOpacity
                     key={tab.id}
@@ -474,7 +475,7 @@ export default function MonitorDetailScreen({
               })}
             </ScrollView>
           </View>
-        )}
+        ))}
 
         {/* ── Screen Body Content ── */}
         <ScrollView
@@ -549,7 +550,7 @@ export default function MonitorDetailScreen({
             )}
 
             {/* ── Tab: Incident ── */}
-            {activeTab === 'incident' && (
+            {selectedTab === 'incident' && (
               <>
                 {(monitor.url || monitor.hostname) && (
                   <View style={s.card}>
@@ -595,7 +596,7 @@ export default function MonitorDetailScreen({
             )}
 
             {/* ── Tab: Record session ── */}
-            {activeTab === 'session' && (
+            {selectedTab === 'session' && (
               <View style={s.card}>
                 <Text style={s.cardTitle}>Enregistrement de session</Text>
                 <View style={s.emptyStateBox}>
@@ -609,7 +610,7 @@ export default function MonitorDetailScreen({
             )}
 
             {/* ── Tab: Monitor ── */}
-            {activeTab === 'monitor' && (
+            {selectedTab === 'monitor' && (
               <>
                 {isGroup && (
                   <View style={s.card}>
@@ -660,7 +661,7 @@ export default function MonitorDetailScreen({
             )}
 
             {/* ── Tab: Statistique ── */}
-            {activeTab === 'stats' && (
+            {selectedTab === 'stats' && (
               <View style={s.card}>
                 <Text style={s.cardTitle}>Statistiques</Text>
                 <ProgressRow
@@ -682,7 +683,7 @@ export default function MonitorDetailScreen({
               </View>
             )}
 
-            {activeTab === 'qa' && isGroup && (
+            {selectedTab === 'qa' && isGroup && (
               <QaReportPanel report={monitor.qaReport} />
             )}
           </>
