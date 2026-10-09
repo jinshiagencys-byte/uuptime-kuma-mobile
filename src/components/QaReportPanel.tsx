@@ -123,7 +123,36 @@ function Evidence({ step }: { step: QaTestStep }) {
   );
 }
 
-function StepResult({ step, index, desktop }: { step: QaTestStep; index: number; desktop: boolean }) {
+function StepResult({
+  step,
+  index,
+  desktop,
+  expanded,
+  onToggleDetails,
+}: {
+  step: QaTestStep;
+  index: number;
+  desktop: boolean;
+  expanded: boolean;
+  onToggleDetails: () => void;
+}) {
+  const details = expanded ? (
+    <View style={styles.observedDetails}>
+      <Text style={styles.actualText}>{step.actual || 'Aucun résultat observé renseigné.'}</Text>
+      <Evidence step={step} />
+    </View>
+  ) : null;
+  const detailsToggle = (
+    <TouchableOpacity
+      accessibilityRole="button"
+      accessibilityState={{ expanded }}
+      onPress={onToggleDetails}
+      style={styles.detailsToggle}
+    >
+      <Text style={styles.detailsToggleText}>{expanded ? 'Masquer les détails' : 'Voir le résultat observé'}</Text>
+    </TouchableOpacity>
+  );
+
   const number = (
     <View style={styles.stepNumber}>
       <Text style={styles.stepNumberText}>{String(step.n ?? index + 1).padStart(2, '0')}</Text>
@@ -145,12 +174,9 @@ function StepResult({ step, index, desktop }: { step: QaTestStep; index: number;
         <View style={styles.mobileStepField}>
           <Text style={styles.cellLabel}>Attendu</Text>
           <Text style={styles.bodyText}>{step.expected || '—'}</Text>
+          {detailsToggle}
+          {details}
         </View>
-        <View style={styles.mobileStepField}>
-          <Text style={styles.cellLabel}>Observé</Text>
-          <Text style={styles.actualText}>{step.actual || 'Aucun résultat observé renseigné.'}</Text>
-        </View>
-        <Evidence step={step} />
       </View>
     );
   }
@@ -164,11 +190,10 @@ function StepResult({ step, index, desktop }: { step: QaTestStep; index: number;
       <View style={[styles.stepCell, styles.preconditionCell]}>
         <Text style={styles.bodyText}>{step.precondition || '—'}</Text>
       </View>
-      <View style={[styles.stepCell, styles.outcomeCell]}>
+      <View style={[styles.stepCell, styles.expectedCell]}>
         <Text style={styles.bodyText}>{step.expected || '—'}</Text>
-        <Text style={styles.inlineObservedLabel}>Observé</Text>
-        <Text style={styles.actualText}>{step.actual || 'Aucun résultat observé renseigné.'}</Text>
-        <Evidence step={step} />
+        {detailsToggle}
+        {details}
       </View>
       <View style={[styles.stepCell, styles.resultCell]}>
         <StatusBadge status={step.status} compact />
@@ -188,9 +213,10 @@ function effectParts(effect: string | QaSideEffect) {
 
 export default function QaReportPanel({ report }: { report?: QaReportRecord | null }) {
   const { width } = useWindowDimensions();
-  const desktop = width >= 1100;
+  const desktop = width >= 980;
   const [selectedCaseId, setSelectedCaseId] = useState<string | null>(null);
   const [showSideEffects, setShowSideEffects] = useState(false);
+  const [expandedStepIds, setExpandedStepIds] = useState<string[]>([]);
 
   if (!report?.report) {
     return (
@@ -317,14 +343,28 @@ export default function QaReportPanel({ report }: { report?: QaReportRecord | nu
                   <View style={styles.stepNumberHeading} />
                   <Text style={[styles.tableHeading, styles.actionCell]}>Action</Text>
                   <Text style={[styles.tableHeading, styles.preconditionCell]}>Précondition</Text>
-                  <Text style={[styles.tableHeading, styles.outcomeCell]}>Attendu / observé</Text>
-                  <Text style={[styles.tableHeading, styles.resultCell]}>Résultat</Text>
+                  <Text style={[styles.tableHeading, styles.expectedCell]}>Attendu</Text>
+                  <Text style={[styles.tableHeading, styles.resultCell]}>Test result</Text>
                 </View>
               )}
 
               <View style={styles.stepList}>
                 {selected.steps.map((step, index) => (
-                  <StepResult key={`${selected.id}-${step.n}`} step={step} index={index} desktop={desktop} />
+                  <StepResult
+                    key={`${selected.id}-${step.n}`}
+                    step={step}
+                    index={index}
+                    desktop={desktop}
+                    expanded={expandedStepIds.includes(`${selected.id}-${step.n}`)}
+                    onToggleDetails={() => {
+                      const stepId = `${selected.id}-${step.n}`;
+                      setExpandedStepIds((current) => (
+                        current.includes(stepId)
+                          ? current.filter((id) => id !== stepId)
+                          : [...current, stepId]
+                      ));
+                    }}
+                  />
                 ))}
               </View>
             </>
@@ -610,13 +650,15 @@ const styles = StyleSheet.create({
   stepCell: { minWidth: 0 },
   actionCell: { flex: 1.05 },
   preconditionCell: { flex: 1 },
-  outcomeCell: { flex: 1.65 },
+  expectedCell: { flex: 1.4 },
   resultCell: { width: 74 },
   cellLabel: { color: C.muted, fontSize: 9, fontWeight: '800', textTransform: 'uppercase', marginBottom: 3 },
   actionText: { color: C.text, fontSize: 11, fontWeight: '700', lineHeight: 16 },
   bodyText: { color: C.text, fontSize: 10, lineHeight: 15 },
-  inlineObservedLabel: { color: C.pink, fontSize: 8, fontWeight: '800', textTransform: 'uppercase', marginTop: 7, marginBottom: 2 },
   actualText: { color: C.muted, fontSize: 10, lineHeight: 15 },
+  observedDetails: { gap: 5, marginTop: 6, padding: 7, borderRadius: 6, backgroundColor: C.panelRaised },
+  detailsToggle: { alignSelf: 'flex-start', marginTop: 6, paddingVertical: 2 },
+  detailsToggleText: { color: C.pink, fontSize: 9, fontWeight: '700' },
   evidence: { marginTop: 8, padding: 7, borderRadius: 6, backgroundColor: C.panelRaised },
   evidenceTitle: { color: C.pink, fontSize: 8, fontWeight: '800', textTransform: 'uppercase', marginBottom: 3 },
   evidenceDetails: { gap: 3 },
