@@ -9,6 +9,8 @@ import {
   ActivityIndicator,
   useWindowDimensions,
   Animated,
+  StatusBar,
+  Image,
 } from 'react-native';
 import { SafeAreaView } from 'react-native-safe-area-context';
 import {
@@ -20,6 +22,7 @@ import {
   Layers,
   ArrowUp,
   ArrowDown,
+  ClipboardCheck,
 } from 'lucide-react-native';
 import {
   getMonitorDetail,
@@ -32,24 +35,26 @@ import {
 } from '../api/relayClient';
 import {
   formatAvailabilityPercent,
+  getAverageAvailability,
   getAvailabilityPercent,
   getStatusTone,
   getSubPageLabels,
 } from '../utils/monitors';
+import QaReportPanel from '../components/QaReportPanel';
 
-// ─── Theme Colors (Light Design Maquette) ────────────────────────────────────
+// ─── Theme Colors ────────────────────────────────────────────────────────────
 const C = {
-  bg: '#FFFFFF',
-  card: '#F8FAFC',
-  cardBorder: '#E2E8F0',
-  textDark: '#1E293B',
-  muted: '#64748B',
-  mutedLight: '#94A3B8',
-  primary: '#2563EB',      // Bleu vif (identique à la maquette)
-  green: '#10B981',
-  red: '#EF4444',
-  yellow: '#F59E0B',
-  slate: '#64748B',
+  bg: '#0F1115',
+  card: '#1A1E27',
+  cardBorder: '#384456',
+  textDark: '#F8FAFC',
+  muted: '#A6B0BF',
+  mutedLight: '#B7C2CF',
+  primary: '#7DD3FC',
+  green: '#A7F3D0',
+  red: '#FCA5A5',
+  yellow: '#FCD34D',
+  slate: '#B9C3CF',
 };
 
 const STATUS_COLOR: Record<MonitorStatus, string> = {
@@ -124,7 +129,7 @@ const HeartbeatTimeline = memo<{ history: HeartbeatPoint[] }>(({ history }) => {
       <View style={s.heartbeatContainer}>
         {blocks.map((h, index) => {
           const status = h ? (h.status as MonitorStatus) : null;
-          const bg = status ? (STATUS_COLOR[status] || C.red) : '#E2E8F0';
+          const bg = status ? (STATUS_COLOR[status] || C.red) : C.cardBorder;
           return <View key={index} style={[s.heartbeatBar, { backgroundColor: bg }]} />;
         })}
       </View>
@@ -186,7 +191,7 @@ const SidebarItem = ({ label, value }: { label: string; value: string }) => (
 );
 
 /** Onglets de l'écran de détail (exporté pour la navigation depuis l'accueil). */
-export type DetailTabKey = 'incident' | 'session' | 'monitor' | 'stats';
+export type DetailTabKey = 'incident' | 'session' | 'monitor' | 'stats' | 'qa';
 
 // ─── Main Screen ──────────────────────────────────────────────────────────────
 export default function MonitorDetailScreen({
@@ -200,7 +205,8 @@ export default function MonitorDetailScreen({
   onBack: () => void;
 }) {
   const { width } = useWindowDimensions();
-  const SIDEBAR_WIDTH = width * 0.82;
+  const isWide = width >= 900;
+  const SIDEBAR_WIDTH = Math.min(width * 0.82, 480);
 
   const [monitor, setMonitor] = useState<MonitorDetail | null>(null);
   const [history, setHistory] = useState<HeartbeatPoint[]>([]);
@@ -301,16 +307,30 @@ export default function MonitorDetailScreen({
 
   const tabs: { id: DetailTabKey; label: string }[] = [
     { id: 'incident', label: 'Incident' },
-    { id: 'session', label: 'Record session' },
-    { id: 'monitor', label: 'Monitor' },
-    { id: 'stats', label: 'Statistique' },
+    { id: 'session', label: 'Sessions' },
+    { id: 'monitor', label: 'Monitoring' },
+    { id: 'stats', label: 'Statistiques' },
+    ...(isGroup ? [{ id: 'qa' as const, label: 'Rapport QA' }] : []),
   ];
 
   const responseTimeScaleMs = 3500;
-  const pingPercent = monitor?.loadTimeMs
-    ? Math.min(100, Math.max(5, (monitor.loadTimeMs / responseTimeScaleMs) * 100))
+  const responseTimeMs = monitor?.loadTimeMs ?? null;
+  const pingPercent = responseTimeMs
+    ? Math.min(100, Math.max(5, (responseTimeMs / responseTimeScaleMs) * 100))
     : 0;
-  const uptimePercent = monitor?.uptime24h != null ? getAvailabilityPercent(monitor) : 100;
+  const groupAvailability = getAverageAvailability(groupChildren, monitor);
+  const uptimePercent = isGroup
+    ? groupAvailability
+    : monitor
+      ? getAvailabilityPercent(monitor)
+      : 0;
+  const statusLabel: Record<MonitorStatus, string> = {
+    up: 'Opérationnel',
+    down: 'Incident détecté',
+    pending: 'En attente de contrôle',
+    maintenance: 'En maintenance',
+    paused: 'En pause',
+  };
 
   /**
    * Carte d'une sous-page d'un groupe.
@@ -355,6 +375,7 @@ export default function MonitorDetailScreen({
 
   return (
     <SafeAreaView style={s.container} edges={['top', 'left', 'right']}>
+      <StatusBar barStyle="light-content" backgroundColor={C.bg} />
       {/* ── Top Navigation Bar ── */}
       <View style={s.headerRow}>
         <TouchableOpacity
@@ -367,7 +388,21 @@ export default function MonitorDetailScreen({
           <ChevronLeft size={26} color={C.textDark} strokeWidth={2.5} />
         </TouchableOpacity>
 
-        <Text style={s.headerTitle}>Details</Text>
+        <View style={s.headerTitleGroup}>
+          {monitor?.logoUrl ? (
+            <Image source={{ uri: monitor.logoUrl }} style={s.headerLogo} />
+          ) : (
+            <View style={s.headerLogoFallback}>
+              <Layers size={17} color={C.primary} />
+            </View>
+          )}
+          <View style={s.headerTitleTextGroup}>
+            <Text style={s.headerTitle} numberOfLines={1}>{monitor?.name ?? 'Détails du monitor'}</Text>
+            {!!(monitor?.url || monitor?.hostname) && (
+              <Text style={s.headerSubtitle} numberOfLines={1}>{monitor.url || monitor.hostname}</Text>
+            )}
+          </View>
+        </View>
 
         <TouchableOpacity
           style={s.headerBtn}
@@ -408,7 +443,7 @@ export default function MonitorDetailScreen({
 
       {/* ── Screen Body Content ── */}
       <ScrollView
-        contentContainerStyle={s.scrollContent}
+        contentContainerStyle={[s.scrollContent, isWide && s.scrollContentWide]}
         showsVerticalScrollIndicator={false}
         refreshControl={
           <RefreshControl
@@ -437,26 +472,86 @@ export default function MonitorDetailScreen({
 
         {monitor && (
           <>
+            <View style={s.detailHero}>
+              <View style={s.heroTopRow}>
+                <View style={s.heroTitleGroup}>
+                  <View style={[s.statusIndicator, { backgroundColor: STATUS_COLOR[monitor.status] }]} />
+                  <View style={s.heroTitleText}>
+                    <Text style={s.heroEyebrow}>{isGroup ? 'VUE DU SITE' : 'MONITOR HTTP'}</Text>
+                    <Text style={s.heroStatus}>{statusLabel[monitor.status]}</Text>
+                  </View>
+                </View>
+                <View style={[s.liveBadge, { borderColor: `${STATUS_COLOR[monitor.status]}55` }]}>
+                  <Text style={[s.liveBadgeText, { color: STATUS_COLOR[monitor.status] }]}>
+                    {monitor.active ? 'ACTIF' : 'EN PAUSE'}
+                  </Text>
+                </View>
+              </View>
+              <View style={s.heroMetrics}>
+                <View style={s.heroMetric}>
+                  <Text style={s.heroMetricLabel}>Disponibilité</Text>
+                  <Text style={[s.heroMetricValue, { color: getStatusTone(groupAvailability, monitor.status, STATUS_COLOR) }]}>
+                    {formatAvailabilityPercent(isGroup ? groupAvailability : getAvailabilityPercent(monitor))}
+                  </Text>
+                  <Text style={s.heroMetricHint}>{isGroup ? 'moyenne des pages suivies' : 'sur les dernières 24 h'}</Text>
+                </View>
+                <View style={s.heroMetricDivider} />
+                <View style={s.heroMetric}>
+                  <Text style={s.heroMetricLabel}>Temps de réponse</Text>
+                  <Text style={s.heroMetricValue}>{formatResponseTimeShort(responseTimeMs)}</Text>
+                  <Text style={s.heroMetricHint}>{formatLastChecked(monitor.metricsCheckedAt || monitor.lastCheckedAt)}</Text>
+                </View>
+                <View style={s.heroMetricDivider} />
+                <View style={s.heroMetric}>
+                  <Text style={s.heroMetricLabel}>{isGroup ? 'Pages suivies' : 'Dernier code HTTP'}</Text>
+                  <Text style={s.heroMetricValue}>{isGroup ? groupChildren.length : monitor.lastHttpCode ?? '—'}</Text>
+                  <Text style={s.heroMetricHint}>{isGroup ? 'dans ce groupe' : formatLastChecked(monitor.lastCheckedAt)}</Text>
+                </View>
+              </View>
+            </View>
+
             {/* ── Tab: Incident ── */}
             {activeTab === 'incident' && (
               <>
                 {(monitor.url || monitor.hostname) && (
                   <View style={s.card}>
-                    <Text style={s.cardTitle}>Server Properties</Text>
+                    <Text style={s.cardTitle}>État du service</Text>
                     <ConfigRow label="URL" value={monitor.url || monitor.hostname || '—'} />
-                    <ConfigRow label="Status code" value={formatStatusCode(monitor)} last />
+                    <ConfigRow label="Code HTTP" value={formatStatusCode(monitor)} />
+                    <ConfigRow label="Dernier contrôle" value={formatLastChecked(monitor.lastCheckedAt)} last />
                   </View>
                 )}
 
                 <View style={s.card}>
-                  <Text style={s.cardTitle}>Incidents récents</Text>
-                  <View style={s.emptyStateBox}>
-                    <CheckCircle2 size={36} color={C.green} />
-                    <Text style={s.emptyStateTitle}>Aucun incident en cours</Text>
-                    <Text style={s.emptyStateSub}>
-                      Tous les services fonctionnent correctement.
-                    </Text>
+                  <View style={s.sectionHeader}>
+                    <View>
+                      <Text style={s.cardTitle}>Incidents récents</Text>
+                      <Text style={s.sectionSubtitle}>Historique des interruptions détectées</Text>
+                    </View>
+                    <View style={s.countBadge}><Text style={s.countBadgeText}>{monitor.recentIncidents.length}</Text></View>
                   </View>
+                  {monitor.recentIncidents.length === 0 ? (
+                    <View style={s.emptyStateBox}>
+                      <CheckCircle2 size={34} color={C.green} />
+                      <Text style={s.emptyStateTitle}>Aucun incident récent</Text>
+                      <Text style={s.emptyStateSub}>Aucune interruption n’a été enregistrée dans l’historique disponible.</Text>
+                    </View>
+                  ) : (
+                    <View style={s.incidentsList}>
+                      {monitor.recentIncidents.map((incident, index) => (
+                        <View key={`${incident.startedAt}-${index}`} style={s.incidentRow}>
+                          <View style={s.incidentIcon}><X size={15} color={C.red} /></View>
+                          <View style={s.incidentContent}>
+                            <Text style={s.incidentTitle}>{incident.title}</Text>
+                            <Text style={s.incidentMeta}>{formatLastChecked(incident.startedAt)} · {incident.durationMinutes} min</Text>
+                          </View>
+                          {incident.httpCode != null && (
+                            <View style={s.httpCodeBadge}><Text style={s.httpCodeText}>{incident.httpCode}</Text></View>
+                          )}
+                        </View>
+                      ))}
+                    </View>
+                  )}
                 </View>
               </>
             )}
@@ -500,19 +595,28 @@ export default function MonitorDetailScreen({
                   </View>
                 )}
 
-                <View style={s.card}>
-                  <Text style={s.cardTitle}>Monitoring</Text>
-                  <ConfigRow label="client:" value={monitor.clientName || '—'} />
-                  <ConfigRow label="groupe:" value={monitor.parentName || monitor.name} />
-                  <ConfigRow label="url:" value={monitor.url || monitor.hostname || '—'} />
-                  <ConfigRow label="responsable:" value={monitor.assignee || 'DevOps Team'} />
-                  <ConfigRow label="dernier check:" value={formatLastChecked(monitor.lastCheckedAt)} />
-                  <ConfigRow label="exp ssl:" value={formatSSLExpiry(monitor.sslValidTo)} last />
-                </View>
+                <View style={[s.monitorCards, isWide && s.monitorCardsWide]}>
+                  <View style={[s.card, s.monitorInfoCard, isWide && s.monitorCardWide]}>
+                    <Text style={s.cardTitle}>Configuration</Text>
+                    <ConfigRow label="Client" value={monitor.clientName || '—'} />
+                    <ConfigRow label="Groupe" value={monitor.parentName || monitor.name} />
+                    <ConfigRow label="URL surveillée" value={monitor.url || monitor.hostname || '—'} />
+                    <ConfigRow label="Responsable" value={monitor.assignee || '—'} />
+                    <ConfigRow label="Fréquence de contrôle" value={monitor.interval != null ? `${monitor.interval / 60} min` : '—'} />
+                    <ConfigRow label="Dernier contrôle" value={formatLastChecked(monitor.lastCheckedAt)} last={!monitor.sslValidTo} />
+                    {monitor.sslValidTo && <ConfigRow label="Expiration SSL" value={formatSSLExpiry(monitor.sslValidTo)} last />}
+                  </View>
 
-                <View style={s.card}>
-                  <Text style={s.cardTitle}>Recent Heartbeats</Text>
-                  <HeartbeatTimeline history={history} />
+                  <View style={[s.card, s.heartbeatCard, isWide && s.monitorCardWide]}>
+                    <View style={s.sectionHeader}>
+                      <View>
+                        <Text style={s.cardTitle}>Historique des contrôles</Text>
+                        <Text style={s.sectionSubtitle}>{history.length} contrôles récents</Text>
+                      </View>
+                      <Clock size={18} color={C.primary} />
+                    </View>
+                    <HeartbeatTimeline history={history} />
+                  </View>
                 </View>
               </>
             )}
@@ -533,11 +637,15 @@ export default function MonitorDetailScreen({
                   label="Temps de réponse :"
                   percent={pingPercent}
                   leftText={formatResponseTimeShort(monitor.loadTimeMs)}
-                  rightText="3.52 s"
+                  rightText="Échelle max : 3,5 s"
                   percentDisplay={`${Math.round(pingPercent)}%`}
                   barColor={C.primary}
                 />
               </View>
+            )}
+
+            {activeTab === 'qa' && isGroup && (
+              <QaReportPanel report={monitor.qaReport} />
             )}
           </>
         )}
@@ -638,7 +746,7 @@ const s = StyleSheet.create({
   tabBarContainer: {
     backgroundColor: C.bg,
     borderBottomWidth: 1,
-    borderBottomColor: '#F1F5F9',
+    borderBottomColor: C.cardBorder,
   },
   tabScrollContent: {
     paddingHorizontal: 20,
@@ -674,7 +782,115 @@ const s = StyleSheet.create({
   scrollContent: {
     padding: 16,
     gap: 16,
+    width: '100%',
+    alignSelf: 'center',
   },
+  scrollContentWide: {
+    maxWidth: 1160,
+    paddingHorizontal: 28,
+    paddingTop: 24,
+    paddingBottom: 32,
+    gap: 18,
+  },
+  detailHero: {
+    gap: 18,
+    padding: 20,
+    backgroundColor: C.card,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+  },
+  heroTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    flexWrap: 'wrap',
+    gap: 12,
+  },
+  heroTitleGroup: { flexDirection: 'row', alignItems: 'center', gap: 12 },
+  statusIndicator: { width: 11, height: 11, borderRadius: 6 },
+  heroTitleText: { gap: 3 },
+  heroEyebrow: { color: C.muted, fontSize: 10, fontWeight: '700', letterSpacing: 1.2 },
+  heroStatus: { color: C.textDark, fontSize: 18, fontWeight: '700' },
+  liveBadge: {
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderRadius: 20,
+    borderWidth: 1,
+    backgroundColor: C.bg,
+  },
+  liveBadgeText: { fontSize: 10, fontWeight: '800', letterSpacing: 0.6 },
+  heroMetrics: { flexDirection: 'row', alignItems: 'stretch', gap: 16 },
+  heroMetric: { flex: 1, gap: 5, minWidth: 0 },
+  heroMetricLabel: { color: C.muted, fontSize: 11, fontWeight: '600' },
+  heroMetricValue: { color: C.textDark, fontSize: 21, fontWeight: '800' },
+  heroMetricHint: { color: C.mutedLight, fontSize: 10, lineHeight: 15 },
+  heroMetricDivider: { width: 1, backgroundColor: C.cardBorder },
+  sectionHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    gap: 12,
+  },
+  sectionSubtitle: { color: C.muted, fontSize: 11, marginTop: -8, marginBottom: 12 },
+  countBadge: {
+    minWidth: 28,
+    height: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 14,
+    backgroundColor: C.bg,
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+  },
+  countBadgeText: { color: C.textDark, fontSize: 12, fontWeight: '700' },
+  incidentsList: { gap: 2 },
+  incidentRow: {
+    minHeight: 66,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 11,
+    paddingVertical: 10,
+    borderBottomWidth: 1,
+    borderBottomColor: C.cardBorder,
+  },
+  incidentIcon: {
+    width: 32,
+    height: 32,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: `${C.red}18`,
+  },
+  incidentContent: { flex: 1, gap: 4 },
+  incidentTitle: { color: C.textDark, fontSize: 13, fontWeight: '700' },
+  incidentMeta: { color: C.muted, fontSize: 11 },
+  httpCodeBadge: { paddingHorizontal: 8, paddingVertical: 5, borderRadius: 7, backgroundColor: C.bg },
+  httpCodeText: { color: C.red, fontSize: 11, fontWeight: '700' },
+  monitorCards: { gap: 14 },
+  monitorCardsWide: { flexDirection: 'row', alignItems: 'flex-start' },
+  monitorCardWide: { flex: 1, minWidth: 0 },
+  heartbeatCard: { minHeight: 190 },
+  headerTitleGroup: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    paddingHorizontal: 4,
+  },
+  headerLogo: { width: 34, height: 34, borderRadius: 10, backgroundColor: C.card },
+  headerLogoFallback: {
+    width: 34,
+    height: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 10,
+    backgroundColor: C.card,
+    borderWidth: 1,
+    borderColor: C.cardBorder,
+  },
+  headerTitleTextGroup: { flex: 1, gap: 2 },
+  headerSubtitle: { color: C.muted, fontSize: 11 },
 
   // ── Cards ──
   card: {
@@ -722,7 +938,7 @@ const s = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    backgroundColor: '#FFFFFF',
+    backgroundColor: C.card,
     borderWidth: 1,
     borderColor: C.cardBorder,
     borderRadius: 10,
@@ -807,7 +1023,7 @@ const s = StyleSheet.create({
   progressTrack: {
     height: 8,
     borderRadius: 4,
-    backgroundColor: '#E2E8F0',
+    backgroundColor: '#202833',
     overflow: 'hidden',
   },
   progressFill: {
@@ -865,7 +1081,7 @@ const s = StyleSheet.create({
     paddingHorizontal: 20,
   },
   retryBtnText: {
-    color: '#FFFFFF',
+    color: '#082F49',
     fontWeight: '600',
   },
 

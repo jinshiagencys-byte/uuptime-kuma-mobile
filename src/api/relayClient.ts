@@ -3,6 +3,7 @@ import { Platform } from 'react-native';
 import { io, type Socket } from 'socket.io-client';
 
 const IS_WEB = Platform.OS === 'web';
+const WEB_RELAY_PROXY_URL = process.env.EXPO_PUBLIC_RELAY_PROXY_URL ?? '';
 const RELAY_URL = IS_WEB
   ? ''
   : typeof process !== 'undefined' && process.env
@@ -82,6 +83,63 @@ export interface RecentIncident {
   httpCode: number | null;
 }
 
+export type QaStepStatus = 'passed' | 'failed' | 'blocked' | 'skipped';
+
+export interface QaEvidence {
+  url?: string;
+  http_status?: number | null;
+  console?: string;
+  network?: string;
+  screenshot?: string;
+}
+
+export interface QaTestStep {
+  n: number;
+  action: string;
+  precondition: string;
+  expected: string;
+  actual: string;
+  status: QaStepStatus;
+  evidence?: QaEvidence;
+}
+
+export interface QaTestCase {
+  id: string;
+  title: string;
+  category: 'functional' | 'security' | 'accessibility' | 'seo' | string;
+  discovered: boolean;
+  status: QaStepStatus;
+  severity: 'P0' | 'P1' | 'P2' | null;
+  steps: QaTestStep[];
+}
+
+export interface QaSideEffect {
+  action?: string;
+  details?: string;
+  reference?: string;
+}
+
+export interface QaResult {
+  test_cases: QaTestCase[];
+  side_effects?: (string | QaSideEffect)[];
+  summary?: {
+    passed?: number;
+    failed?: number;
+    blocked?: number;
+    skipped?: number;
+  };
+}
+
+export interface QaReportRecord {
+  id: string | number;
+  status: string;
+  report: QaResult | null;
+  github_run_id: number | null;
+  github_run_attempt: number | null;
+  github_run_url: string | null;
+  finished_at: string | null;
+}
+
 export interface OpenClawCrawlPage {
   url: string;
   status: 'UP' | 'DOWN' | string;
@@ -122,12 +180,13 @@ export interface MonitorDetail {
   crawlAcknowledged: boolean | null;
   lastHttpCode: number | null;
   recentIncidents: RecentIncident[];
+  qaReport?: QaReportRecord | null;
 }
 
 // --- Fonctions HTTP génériques ---
 function getPlatformUrl(path: string): string {
   if (IS_WEB) {
-    return `/api/relay${path}`; // Use Vercel proxy on web
+    return `${WEB_RELAY_PROXY_URL.replace(/\/$/, '')}/api/relay?path=${encodeURIComponent(path)}`;
   }
   return `${RELAY_URL}${path}`; // Direct relay on native
 }
@@ -147,15 +206,16 @@ async function relayFetch<T>(path: string, body: Record<string, unknown>): Promi
     throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
   }
 
+  const requestUrl = getPlatformUrl(path);
   let response: Response;
   try {
-    response = await fetch(getPlatformUrl(path), {
+    response = await fetch(requestUrl, {
       method: 'POST',
       headers: getPlatformHeaders(),
       body: JSON.stringify(body),
     });
   } catch {
-    throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
+    throw new RelayError(`Impossible de joindre le relais (${requestUrl}).`);
   }
 
   let data: any = null;
@@ -175,14 +235,15 @@ async function relayFetchGet<T>(path: string): Promise<T> {
     throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
   }
 
+  const requestUrl = getPlatformUrl(path);
   let response: Response;
   try {
-    response = await fetch(getPlatformUrl(path), {
+    response = await fetch(requestUrl, {
       method: 'GET',
       headers: getPlatformHeaders(),
     });
   } catch {
-    throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
+    throw new RelayError(`Impossible de joindre le relais (${requestUrl}).`);
   }
 
   let data: any = null;
@@ -202,14 +263,15 @@ async function relayFetchDelete<T>(path: string): Promise<T> {
     throw new RelayError("Le secret de relay n'est pas défini pour le build natif.");
   }
 
+  const requestUrl = getPlatformUrl(path);
   let response: Response;
   try {
-    response = await fetch(getPlatformUrl(path), {
+    response = await fetch(requestUrl, {
       method: 'DELETE',
       headers: getPlatformHeaders(),
     });
   } catch {
-    throw new RelayError(`Impossible de joindre le relay (${RELAY_URL}).`);
+    throw new RelayError(`Impossible de joindre le relais (${requestUrl}).`);
   }
 
   let data: any = null;
