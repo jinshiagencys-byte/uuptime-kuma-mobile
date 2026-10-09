@@ -331,7 +331,18 @@ export default function HomeScreen({
           <Appbar.Action icon={() => <Menu size={22} color={theme.colors.onBackground} />} onPress={() => {}} />
           <Appbar.Content title="" />
           <Appbar.Action icon={() => <Bell size={20} color={theme.colors.onBackground} />} onPress={() => {}} />
-          <Appbar.Action icon={() => <Plus size={22} color={theme.colors.onBackground} />} onPress={onNavigateToAdd} />
+          <View style={styles.createAction}>
+            <TouchableOpacity
+              style={styles.createButton}
+              onPress={onNavigateToAdd}
+              activeOpacity={0.82}
+              accessibilityRole="button"
+              accessibilityLabel="Créer un monitor"
+            >
+              <Plus size={16} color={theme.colors.onPrimary} strokeWidth={2.2} />
+              <Text style={styles.createButtonText}>Ajouter</Text>
+            </TouchableOpacity>
+          </View>
         </Appbar.Header>
       </View>
 
@@ -416,6 +427,29 @@ const styles = StyleSheet.create({
     elevation: 0,
     shadowOpacity: 0,
     borderBottomWidth: 0,
+  },
+  createAction: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    height: 34,
+    marginHorizontal: 8,
+    borderRadius: 9,
+    overflow: 'hidden',
+    backgroundColor: theme.colors.primary,
+  },
+  createButton: {
+    height: '100%',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 7,
+    paddingLeft: 12,
+    paddingRight: 12,
+  },
+  createButtonText: {
+    color: theme.colors.onPrimary,
+    fontSize: 12,
+    fontWeight: '600',
   },
   content: {
     flex: 1,

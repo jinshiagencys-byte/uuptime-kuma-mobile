@@ -23,6 +23,7 @@ import {
   ArrowUp,
   ArrowDown,
   ClipboardCheck,
+  Activity,
 } from 'lucide-react-native';
 import {
   getMonitorDetail,
@@ -200,7 +201,7 @@ export default function MonitorDetailScreen({
   onBack,
 }: {
   monitorId: number | string;
-  /** Onglet ouvert à l'affichage (un groupe s'ouvre sur « Monitor »). */
+  /** Onglet initial demandé par l'écran appelant. */
   initialTab?: DetailTabKey;
   onBack: () => void;
 }) {
@@ -263,6 +264,13 @@ export default function MonitorDetailScreen({
         const data = await getMonitorDetail(monitorId);
         if (!isMounted.current) return;
         setMonitor(data.monitor);
+        setActiveTab(
+          data.monitor.type === 'group'
+            ? 'qa'
+            : initialTab === 'qa'
+              ? 'monitor'
+              : initialTab
+        );
         setHistory(data.history);
         setError(null);
 
@@ -294,7 +302,7 @@ export default function MonitorDetailScreen({
         setRefreshing(false);
       }
     },
-    [monitorId]
+    [monitorId, initialTab]
   );
 
   useEffect(() => {
@@ -305,13 +313,14 @@ export default function MonitorDetailScreen({
     };
   }, [fetchDetail]);
 
-  const tabs: { id: DetailTabKey; label: string }[] = [
-    { id: 'incident', label: 'Incident' },
-    { id: 'session', label: 'Sessions' },
-    { id: 'monitor', label: 'Monitoring' },
-    { id: 'stats', label: 'Statistiques' },
-    ...(isGroup ? [{ id: 'qa' as const, label: 'Rapport QA' }] : []),
-  ];
+  const tabs: { id: DetailTabKey; label: string; icon?: typeof Activity }[] = isGroup
+    ? [{ id: 'qa', label: 'Test lancé', icon: Activity }]
+    : [
+        { id: 'incident', label: 'Incident' },
+        { id: 'session', label: 'Sessions' },
+        { id: 'monitor', label: 'Monitoring' },
+        { id: 'stats', label: 'Statistiques' },
+      ];
 
   const responseTimeScaleMs = 3500;
   const responseTimeMs = monitor?.loadTimeMs ?? null;
@@ -415,45 +424,72 @@ export default function MonitorDetailScreen({
         </TouchableOpacity>
       </View>
 
-      {/* ── Horizontal Tab Bar ─ */}
-      <View style={s.tabBarContainer}>
-        <ScrollView
-          horizontal
-          showsHorizontalScrollIndicator={false}
-          contentContainerStyle={s.tabScrollContent}
-        >
-          {tabs.map((tab) => {
-            const isActive = activeTab === tab.id;
-            return (
-              <TouchableOpacity
-                key={tab.id}
-                style={s.tabItem}
-                onPress={() => setActiveTab(tab.id)}
-                activeOpacity={0.7}
-              >
-                <Text style={[s.tabText, isActive && s.tabTextActive]}>
-                  {tab.label}
-                </Text>
-                {isActive && <View style={s.activeIndicator} />}
-              </TouchableOpacity>
-            );
-          })}
-        </ScrollView>
-      </View>
+      <View style={[s.detailBody, isWide && s.detailBodyWide]}>
+        {isWide ? (
+          <View style={[s.tabBarContainer, s.tabBarContainerWide]}>
+            <Text style={s.navSectionLabel}>MONITOR</Text>
+            {tabs.map((tab) => {
+              const isActive = activeTab === tab.id;
+              const Icon = tab.icon;
+              return (
+                <TouchableOpacity
+                  key={tab.id}
+                  style={[s.tabItem, s.tabItemVertical, isActive && s.tabItemVerticalActive]}
+                  onPress={() => setActiveTab(tab.id)}
+                  activeOpacity={0.7}
+                  accessibilityRole="tab"
+                  accessibilityState={{ selected: isActive }}
+                >
+                  {Icon && <Icon size={18} color={isActive ? C.primary : C.muted} strokeWidth={2} />}
+                  <Text style={[s.tabText, s.tabTextVertical, isActive && s.tabTextActive]}>
+                    {tab.label}
+                  </Text>
+                  {isActive && <View style={s.activeIndicatorVertical} />}
+                </TouchableOpacity>
+              );
+            })}
+          </View>
+        ) : (
+          <View style={s.tabBarContainer}>
+            <ScrollView
+              horizontal
+              showsHorizontalScrollIndicator={false}
+              contentContainerStyle={s.tabScrollContent}
+            >
+              {tabs.map((tab) => {
+                const isActive = activeTab === tab.id;
+                return (
+                  <TouchableOpacity
+                    key={tab.id}
+                    style={s.tabItem}
+                    onPress={() => setActiveTab(tab.id)}
+                    activeOpacity={0.7}
+                    accessibilityRole="tab"
+                    accessibilityState={{ selected: isActive }}
+                  >
+                    <Text style={[s.tabText, isActive && s.tabTextActive]}>{tab.label}</Text>
+                    {isActive && <View style={s.activeIndicator} />}
+                  </TouchableOpacity>
+                );
+              })}
+            </ScrollView>
+          </View>
+        )}
 
-      {/* ── Screen Body Content ── */}
-      <ScrollView
-        contentContainerStyle={[s.scrollContent, isWide && s.scrollContentWide]}
-        showsVerticalScrollIndicator={false}
-        refreshControl={
-          <RefreshControl
-            refreshing={refreshing}
-            onRefresh={() => fetchDetail(true)}
-            tintColor={C.primary}
-            colors={[C.primary]}
-          />
-        }
-      >
+        {/* ── Screen Body Content ── */}
+        <ScrollView
+          style={isWide ? s.detailContentWide : undefined}
+          contentContainerStyle={[s.scrollContent, isWide && s.scrollContentWide]}
+          showsVerticalScrollIndicator={false}
+          refreshControl={
+            <RefreshControl
+              refreshing={refreshing}
+              onRefresh={() => fetchDetail(true)}
+              tintColor={C.primary}
+              colors={[C.primary]}
+            />
+          }
+        >
         {loading && !monitor && (
           <View style={s.centered}>
             <ActivityIndicator size="large" color={C.primary} />
@@ -472,43 +508,45 @@ export default function MonitorDetailScreen({
 
         {monitor && (
           <>
-            <View style={s.detailHero}>
-              <View style={s.heroTopRow}>
-                <View style={s.heroTitleGroup}>
-                  <View style={[s.statusIndicator, { backgroundColor: STATUS_COLOR[monitor.status] }]} />
-                  <View style={s.heroTitleText}>
-                    <Text style={s.heroEyebrow}>{isGroup ? 'VUE DU SITE' : 'MONITOR HTTP'}</Text>
-                    <Text style={s.heroStatus}>{statusLabel[monitor.status]}</Text>
+            {!isGroup && (
+              <View style={s.detailHero}>
+                <View style={s.heroTopRow}>
+                  <View style={s.heroTitleGroup}>
+                    <View style={[s.statusIndicator, { backgroundColor: STATUS_COLOR[monitor.status] }]} />
+                    <View style={s.heroTitleText}>
+                      <Text style={s.heroEyebrow}>MONITOR HTTP</Text>
+                      <Text style={s.heroStatus}>{statusLabel[monitor.status]}</Text>
+                    </View>
+                  </View>
+                  <View style={[s.liveBadge, { borderColor: `${STATUS_COLOR[monitor.status]}55` }]}>
+                    <Text style={[s.liveBadgeText, { color: STATUS_COLOR[monitor.status] }]}>
+                      {monitor.active ? 'ACTIF' : 'EN PAUSE'}
+                    </Text>
                   </View>
                 </View>
-                <View style={[s.liveBadge, { borderColor: `${STATUS_COLOR[monitor.status]}55` }]}>
-                  <Text style={[s.liveBadgeText, { color: STATUS_COLOR[monitor.status] }]}>
-                    {monitor.active ? 'ACTIF' : 'EN PAUSE'}
-                  </Text>
+                <View style={s.heroMetrics}>
+                  <View style={s.heroMetric}>
+                    <Text style={s.heroMetricLabel}>Disponibilité</Text>
+                    <Text style={[s.heroMetricValue, { color: getStatusTone(groupAvailability, monitor.status, STATUS_COLOR) }]}>
+                      {formatAvailabilityPercent(getAvailabilityPercent(monitor))}
+                    </Text>
+                    <Text style={s.heroMetricHint}>sur les dernières 24 h</Text>
+                  </View>
+                  <View style={s.heroMetricDivider} />
+                  <View style={s.heroMetric}>
+                    <Text style={s.heroMetricLabel}>Temps de réponse</Text>
+                    <Text style={s.heroMetricValue}>{formatResponseTimeShort(responseTimeMs)}</Text>
+                    <Text style={s.heroMetricHint}>{formatLastChecked(monitor.metricsCheckedAt || monitor.lastCheckedAt)}</Text>
+                  </View>
+                  <View style={s.heroMetricDivider} />
+                  <View style={s.heroMetric}>
+                    <Text style={s.heroMetricLabel}>Dernier code HTTP</Text>
+                    <Text style={s.heroMetricValue}>{monitor.lastHttpCode ?? '—'}</Text>
+                    <Text style={s.heroMetricHint}>{formatLastChecked(monitor.lastCheckedAt)}</Text>
+                  </View>
                 </View>
               </View>
-              <View style={s.heroMetrics}>
-                <View style={s.heroMetric}>
-                  <Text style={s.heroMetricLabel}>Disponibilité</Text>
-                  <Text style={[s.heroMetricValue, { color: getStatusTone(groupAvailability, monitor.status, STATUS_COLOR) }]}>
-                    {formatAvailabilityPercent(isGroup ? groupAvailability : getAvailabilityPercent(monitor))}
-                  </Text>
-                  <Text style={s.heroMetricHint}>{isGroup ? 'moyenne des pages suivies' : 'sur les dernières 24 h'}</Text>
-                </View>
-                <View style={s.heroMetricDivider} />
-                <View style={s.heroMetric}>
-                  <Text style={s.heroMetricLabel}>Temps de réponse</Text>
-                  <Text style={s.heroMetricValue}>{formatResponseTimeShort(responseTimeMs)}</Text>
-                  <Text style={s.heroMetricHint}>{formatLastChecked(monitor.metricsCheckedAt || monitor.lastCheckedAt)}</Text>
-                </View>
-                <View style={s.heroMetricDivider} />
-                <View style={s.heroMetric}>
-                  <Text style={s.heroMetricLabel}>{isGroup ? 'Pages suivies' : 'Dernier code HTTP'}</Text>
-                  <Text style={s.heroMetricValue}>{isGroup ? groupChildren.length : monitor.lastHttpCode ?? '—'}</Text>
-                  <Text style={s.heroMetricHint}>{isGroup ? 'dans ce groupe' : formatLastChecked(monitor.lastCheckedAt)}</Text>
-                </View>
-              </View>
-            </View>
+            )}
 
             {/* ── Tab: Incident ── */}
             {activeTab === 'incident' && (
@@ -649,7 +687,8 @@ export default function MonitorDetailScreen({
             )}
           </>
         )}
-      </ScrollView>
+        </ScrollView>
+      </View>
 
       {/* ── Backdrop Overlay ── */}
       {sidebarOpen && (
@@ -748,6 +787,26 @@ const s = StyleSheet.create({
     borderBottomWidth: 1,
     borderBottomColor: C.cardBorder,
   },
+  tabBarContainerWide: {
+    width: 224,
+    borderBottomWidth: 0,
+    borderRightWidth: 1,
+    borderRightColor: C.cardBorder,
+    paddingTop: 10,
+    paddingBottom: 16,
+  },
+  detailBody: { flex: 1, minHeight: 0 },
+  detailBodyWide: { flexDirection: 'row' },
+  detailContentWide: { flex: 1, minWidth: 0 },
+  navSectionLabel: {
+    color: C.muted,
+    fontSize: 10,
+    fontWeight: '700',
+    letterSpacing: 1.1,
+    paddingHorizontal: 16,
+    paddingTop: 20,
+    paddingBottom: 10,
+  },
   tabScrollContent: {
     paddingHorizontal: 20,
     gap: 24,
@@ -759,6 +818,19 @@ const s = StyleSheet.create({
     position: 'relative',
     minWidth: 60,
   },
+  tabItemVertical: {
+    minHeight: 48,
+    flexDirection: 'row',
+    justifyContent: 'flex-start',
+    gap: 12,
+    marginHorizontal: 8,
+    marginVertical: 2,
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    borderRadius: 12,
+  },
+  tabItemVerticalActive: { backgroundColor: C.card },
+  tabTextVertical: { flex: 1, textAlign: 'left' },
   tabText: {
     fontSize: 15,
     fontWeight: '500',
@@ -776,6 +848,16 @@ const s = StyleSheet.create({
     height: 3,
     backgroundColor: C.primary,
     borderRadius: 2,
+  },
+  activeIndicatorVertical: {
+    position: 'absolute',
+    left: 0,
+    top: 10,
+    bottom: 10,
+    width: 3,
+    backgroundColor: C.primary,
+    borderTopRightRadius: 2,
+    borderBottomRightRadius: 2,
   },
 
   // ── Scroll Content ──
