@@ -26,6 +26,11 @@ export interface CreateMonitorGroupResult {
   groupId: string | number;
   created: (string | number)[];
   errors: string[];
+  workflowDispatch?: {
+    triggered: boolean;
+    reason?: 'missing_configuration' | 'github_api_error' | 'network_error';
+    status?: number;
+  };
 }
 
 export class RelayError extends Error {
@@ -330,7 +335,12 @@ export async function createMonitorGroup(
       apiEndpoints,
     }
   );
-  return { groupId: data.groupId, created: data.created, errors: data.errors };
+  return {
+    groupId: data.groupId,
+    created: data.created,
+    errors: data.errors,
+    workflowDispatch: data.workflowDispatch,
+  };
 }
 
 export async function createMonitor(

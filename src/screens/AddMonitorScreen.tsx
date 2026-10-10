@@ -172,11 +172,27 @@ export default function AddMonitorScreen({ onBack }: { onBack: () => void }) {
       const selectedPages = scanInternalPages
         ? pages.filter((p) => selectedUrls.has(p.url))
         : [];
-      await createMonitorGroup(name.trim(), groupName.trim(), url.trim(), selectedPages, assignee.trim(), frequency, notificationFrequency);
-      toastiva.success('Monitor créé avec succès', {
-        description: `La vérification de ${groupName.trim()} a démarré`,
-        duration: 4000,
-      });
+      const result = await createMonitorGroup(name.trim(), groupName.trim(), url.trim(), selectedPages, assignee.trim(), frequency, notificationFrequency);
+      const workflowDispatch = result.workflowDispatch;
+      if (workflowDispatch?.triggered) {
+        toastiva.success('Monitor créé avec succès', {
+          description: `La vérification de ${groupName.trim()} a démarré`,
+          duration: 4000,
+        });
+      } else {
+        let dispatchMessage = 'Monitor créé, mais le relay ne confirme pas le lancement du contrôle QA.';
+        if (workflowDispatch?.reason === 'missing_configuration') {
+          dispatchMessage = 'Monitor créé, mais le relay ne dispose pas de la configuration GitHub pour lancer le contrôle.';
+        } else if (workflowDispatch?.status) {
+          dispatchMessage = `Monitor créé, mais GitHub a refusé le lancement (HTTP ${workflowDispatch.status}). Vérifie les logs du relay.`;
+        } else if (workflowDispatch?.reason === 'network_error') {
+          dispatchMessage = 'Monitor créé, mais le relay n’a pas pu joindre GitHub. Vérifie les logs du relay.';
+        }
+        toastiva.error('Monitor créé, contrôle QA non lancé', {
+          description: dispatchMessage,
+          duration: 4000,
+        });
+      }
 
       onBack();
     } catch (err) {
